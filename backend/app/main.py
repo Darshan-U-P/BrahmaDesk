@@ -579,8 +579,8 @@ app.include_router(installer_router)
 
 
 async def load_saved_llama_server_path() -> None:
-    """Restore a user-selected llama.cpp executable path before model startup."""
-    global LLAMA_SERVER_EXE
+    """Restore the selected runtime and verified model configuration before startup."""
+    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_GPU_LAYERS, MODEL_ID
     try:
         if __package__:
             from . import installer as installer_service
@@ -596,7 +596,20 @@ async def load_saved_llama_server_path() -> None:
             candidate = Path(saved.get("path", "")).expanduser()
             if candidate.is_file() and candidate.name.casefold() == "llama-server.exe":
                 LLAMA_SERVER_EXE = str(candidate.resolve())
-    except (OSError, sqlite3.Error, ValueError, AttributeError):
+        with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+            row = db.execute(
+                "SELECT value_json FROM installer_settings WHERE key='inference'"
+            ).fetchone()
+        if row:
+            config = json.loads(row[0])
+            registered = installer_service._registry_rows().get(config.get("model_id"))
+            model_path = Path(config.get("model_path", "")).expanduser()
+            if registered and registered.get("verified") and model_path.is_file() and str(model_path.resolve()) == str(Path(registered["path"]).resolve()):
+                LLAMA_MODEL_PATH = str(model_path.resolve())
+                LLAMA_CONTEXT_SIZE = int(config.get("context_size", LLAMA_CONTEXT_SIZE))
+                LLAMA_GPU_LAYERS = str(config.get("gpu_layers", LLAMA_GPU_LAYERS))
+                MODEL_ID = str(config.get("model_id", MODEL_ID))
+    except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
         # Keep the environment/default path if no valid saved runtime is available.
         return
 
