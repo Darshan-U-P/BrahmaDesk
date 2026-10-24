@@ -317,3 +317,9 @@ Roadmap priorities may change as development progresses. Planned features will b
 ## Contributing and Feedback
 
 Bug reports, feature suggestions, and improvement ideas are welcome. When reporting a problem, include the Brahma Desk version, relevant logs, operating system details, and steps to reproduce the issue. Do not include API credentials, private keys, certificate passwords, or other secrets.
+
+## v0.2.0 release milestone
+
+Brahma Desk's custom lotus/atomic logo source is maintained at `desktop/build/logo.svg`, with branded installer artwork source at `desktop/build/installer-artwork.svg`. Windows packaging is configured to use `desktop/build/icon.ico`. The NSIS installer supports installation-directory selection, Start Menu and desktop shortcuts, launch-after-setup, and preserves application data when uninstalling.
+
+Before publishing a production installer, validate on Windows: clean install, upgrade from v0.1.2, profile persistence, existing GGUF discovery, model download cancellation/retry/integrity verification, updater download/install/restart, and uninstall data-preservation behavior. Do not mark the release verified until those tests pass on a built installer.

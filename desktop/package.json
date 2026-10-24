@@ -1,6 +1,6 @@
 {
   "name": "brahma-desk",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -63,7 +63,8 @@
           ]
         }
       ],
-      "artifactName": "BrahmaDesk-Setup-${version}.${ext}"
+      "artifactName": "BrahmaDesk-Setup-${version}.${ext}",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -71,7 +72,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Brahma Desk",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "runAfterFinish": true
     },
     "publish": [
       {
