@@ -568,7 +568,10 @@ app.add_middleware(
 
 
 # Smart installer API routes (hardware, catalog, downloads, validation, inference).
-from .installer import router as installer_router
+if __package__:
+    from .installer import router as installer_router
+else:  # Existing tests import this module as top-level "main".
+    from installer import router as installer_router
 app.include_router(installer_router)
 
 
