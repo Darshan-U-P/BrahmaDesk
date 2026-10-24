@@ -427,24 +427,44 @@ async def _download_job(job_id: str, entry: dict[str, Any], destination: Path) -
         if offset > total:
             partial.unlink(missing_ok=True)
             offset = 0
-        headers = {"Range": f"bytes={offset}-"} if offset else {}
         timeout = httpx.Timeout(connect=30, read=90, write=30, pool=30)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            async with client.stream("GET", metadata["download_url"], headers=headers) as response:
-                if offset and response.status_code != 206:
-                    partial.unlink(missing_ok=True)
-                    raise RuntimeError("The server did not honor resume. Retry the download to restart safely.")
-                response.raise_for_status()
-                mode = "ab" if offset else "wb"
-                last_persisted = offset
-                with partial.open(mode) as stream:
-                    async for chunk in response.aiter_bytes(1024 * 1024):
-                        stream.write(chunk)
-                        job["bytes_downloaded"] = stream.tell()
-                        job["progress"] = min(99, int(stream.tell() * 100 / total)) if total else 0
-                        if stream.tell() - last_persisted >= 8 * 1024 * 1024:
-                            _persist_job(job)
-                            last_persisted = stream.tell()
+        if offset < total:
+            last_error: Exception | None = None
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                for attempt in range(3):
+                    offset = partial.stat().st_size if partial.exists() else 0
+                    headers = {"Range": f"bytes={offset}-"} if offset else {}
+                    try:
+                        async with client.stream("GET", metadata["download_url"], headers=headers) as response:
+                            response.raise_for_status()
+                            if offset and response.status_code == 200:
+                                # The host ignored Range; safely restart from byte zero using this full response.
+                                partial.unlink(missing_ok=True)
+                                offset = 0
+                            elif offset and response.status_code != 206:
+                                raise RuntimeError("The server returned an unexpected response for a resumed download.")
+                            mode = "ab" if offset else "wb"
+                            last_persisted = offset
+                            with partial.open(mode) as stream:
+                                async for chunk in response.aiter_bytes(1024 * 1024):
+                                    stream.write(chunk)
+                                    job["bytes_downloaded"] = stream.tell()
+                                    job["progress"] = min(99, int(stream.tell() * 100 / total)) if total else 0
+                                    if stream.tell() - last_persisted >= 8 * 1024 * 1024:
+                                        _persist_job(job)
+                                        last_persisted = stream.tell()
+                        last_error = None
+                        break
+                    except (httpx.HTTPError, OSError, RuntimeError) as exc:
+                        last_error = exc
+                        if attempt == 2:
+                            raise
+                        await asyncio.sleep(2 ** attempt)
+            if last_error is not None:
+                raise last_error
+        else:
+            job["bytes_downloaded"] = total
+            job["progress"] = 99
         if partial.stat().st_size != total:
             raise RuntimeError(f"Downloaded byte count mismatch: expected {total}, received {partial.stat().st_size}.")
         actual_sha = await asyncio.to_thread(_sha256, partial)
