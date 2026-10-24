@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import secrets
+import socket
 import sqlite3
 import subprocess
 import time
@@ -208,6 +209,33 @@ LLAMA_MODEL_PATH = os.getenv(
 LLAMA_HOST = os.getenv("LLAMA_HOST", "127.0.0.1")
 LLAMA_PORT = int(os.getenv("LLAMA_PORT", "8080"))
 BACKEND_PORT = int(os.getenv("BRAHMA_BACKEND_PORT", "8000"))
+LLAMA_ENDPOINT_STATE_PATH = DATA_DIR / "active-llama-endpoint.json"
+
+# Keep a fallback port across app restarts when an external server occupies the
+# default port. Explicit environment configuration always takes precedence.
+if not os.getenv("LLAMA_BASE_URL") and not os.getenv("LLAMA_PORT"):
+    try:
+        saved_endpoint = json.loads(LLAMA_ENDPOINT_STATE_PATH.read_text(encoding="utf-8"))
+        saved_port = int(saved_endpoint.get("port", 0))
+        if 1024 <= saved_port <= 65535:
+            LLAMA_PORT = saved_port
+            LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+
+
+def _find_available_llama_port() -> int:
+    """Ask Windows for an available loopback TCP port for a managed server."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((LLAMA_HOST, 0))
+        return int(sock.getsockname()[1])
+
+
+def _persist_llama_endpoint(port: int) -> None:
+    """Persist the managed endpoint so the next app launch targets the same port."""
+    temporary = LLAMA_ENDPOINT_STATE_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"host": LLAMA_HOST, "port": port}), encoding="utf-8")
+    temporary.replace(LLAMA_ENDPOINT_STATE_PATH)
 LLAMA_CONTEXT_SIZE = int(os.getenv("LLAMA_CONTEXT_SIZE", "4096"))
 LLAMA_THREADS = int(os.getenv("LLAMA_THREADS", str(max(1, (os.cpu_count() or 4) - 1))))
 LLAMA_GPU_LAYERS = os.getenv("LLAMA_GPU_LAYERS", "20")
@@ -1467,11 +1495,11 @@ async def set_active_profile(
 
 @app.post("/api/installer/activate/{model_id}")
 async def activate_installer_model(model_id: str) -> dict[str, Any]:
-    """Apply a registered model and prove it can generate a short response.
+    """Activate a registered model and prove it can generate a short response.
 
-    An already-running llama.cpp process not owned by this backend is never
-    stopped or reconfigured. The user must stop that external server manually
-    before activating a different model through Brahma Desk.
+    Never stop or reconfigure an external server. If the configured endpoint is
+    occupied by one, move Brahma Desk's managed server to an available loopback
+    port and persist that endpoint for subsequent launches.
     """
     global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
     global llama_process, llama_process_owned, llama_start_error
@@ -1496,10 +1524,20 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     async with shutdown_lock:
         server_ready = await llama_is_ready()
         if server_ready and not llama_process_owned:
-            raise HTTPException(
-                status_code=409,
-                detail="A llama.cpp server already running outside Brahma Desk. It was left untouched. Stop that server yourself, then retry activation.",
-            )
+            # The configured port belongs to an external process. Leave it
+            # untouched and start Brahma Desk's own server on another port.
+            # Persist the new endpoint so chat does not reconnect to the
+            # external server after the application is restarted.
+            try:
+                LLAMA_PORT = _find_available_llama_port()
+                LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
+                _persist_llama_endpoint(LLAMA_PORT)
+                server_ready = await llama_is_ready()
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Could not allocate a separate local llama.cpp port: {exc}",
+                ) from exc
 
         if llama_process_owned and llama_process is not None:
             same_model = Path(LLAMA_MODEL_PATH).resolve() == model_path.resolve()
