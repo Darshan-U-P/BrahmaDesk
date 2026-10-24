@@ -11,3 +11,6 @@
 
 .installer-runtime-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.installer-runtime-row code{font-size:10px;color:var(--text-secondary,#a1a1aa);overflow-wrap:anywhere;white-space:normal}.installer-runtime-warning{font-size:10px;line-height:1.5;color:#f0cb7b;margin-bottom:0}
 @media(max-width:900px){.installer-runtime-row{align-items:flex-start;flex-direction:column}}
+
+.installer-cancel-download{border:1px solid var(--border-color,#34343d);border-radius:6px;padding:4px 7px;background:transparent;color:var(--text-secondary,#a1a1aa);font-size:10px;cursor:pointer}
+.installer-download-title{align-items:center}
