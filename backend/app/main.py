@@ -1571,8 +1571,29 @@ async def get_installer_runtime() -> dict[str, Any]:
         "executable_path": LLAMA_SERVER_EXE,
         "exists": Path(LLAMA_SERVER_EXE).is_file(),
         "runtime": "llama.cpp",
-        "note": "Brahma Desk does not bundle llama.cpp in this release. Select a compatible llama-server.exe build on this PC.",
+        "note": "If no runtime is found, install the official Windows x64 CPU build automatically, or select an existing compatible llama-server.exe.",
     }
+
+
+@app.post("/api/installer/runtime/install")
+async def install_installer_runtime() -> dict[str, Any]:
+    """Install the latest official llama.cpp Windows x64 CPU runtime on demand."""
+    global LLAMA_SERVER_EXE
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
+    installed = await installer_service.install_llama_cpu_runtime()
+    candidate = Path(installed["executable_path"]).resolve()
+    installer_service._registry_init()
+    with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+        db.execute(
+            "INSERT INTO installer_settings(key,value_json,updated_at) VALUES('runtime_executable',?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+            (json.dumps({"path": str(candidate), "version": installed.get("version"), "source": "official-github-release"}), time.time()),
+        )
+    LLAMA_SERVER_EXE = str(candidate)
+    return {**installed, "executable_path": LLAMA_SERVER_EXE, "exists": True, "saved": True, "runtime": "llama.cpp"}
 
 
 @app.post("/api/installer/runtime")
