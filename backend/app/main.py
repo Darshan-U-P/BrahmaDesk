@@ -533,6 +533,7 @@ async def start_llama_if_needed() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    await load_saved_llama_server_path()
     await start_llama_if_needed()
 
     try:
@@ -573,6 +574,29 @@ if __package__:
 else:  # Existing tests import this module as top-level "main".
     from installer import router as installer_router
 app.include_router(installer_router)
+
+
+async def load_saved_llama_server_path() -> None:
+    """Restore a user-selected llama.cpp executable path before model startup."""
+    global LLAMA_SERVER_EXE
+    try:
+        if __package__:
+            from . import installer as installer_service
+        else:
+            import installer as installer_service
+        installer_service._registry_init()
+        with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+            row = db.execute(
+                "SELECT value_json FROM installer_settings WHERE key='runtime_executable'"
+            ).fetchone()
+        if row:
+            saved = json.loads(row[0])
+            candidate = Path(saved.get("path", "")).expanduser()
+            if candidate.is_file() and candidate.name.casefold() == "llama-server.exe":
+                LLAMA_SERVER_EXE = str(candidate.resolve())
+    except (OSError, sqlite3.Error, ValueError, AttributeError):
+        # Keep the environment/default path if no valid saved runtime is available.
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -1515,3 +1539,42 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
         "context_size": LLAMA_CONTEXT_SIZE,
         "gpu_layers": LLAMA_GPU_LAYERS,
     }
+
+
+class InstallerRuntimePathRequest(BaseModel):
+    executable_path: str = Field(min_length=1, max_length=2048)
+
+
+@app.get("/api/installer/runtime")
+async def get_installer_runtime() -> dict[str, Any]:
+    return {
+        "executable_path": LLAMA_SERVER_EXE,
+        "exists": Path(LLAMA_SERVER_EXE).is_file(),
+        "runtime": "llama.cpp",
+        "note": "Brahma Desk does not bundle llama.cpp in this release. Select a compatible llama-server.exe build on this PC.",
+    }
+
+
+@app.post("/api/installer/runtime")
+async def set_installer_runtime(request: InstallerRuntimePathRequest) -> dict[str, Any]:
+    global LLAMA_SERVER_EXE
+    candidate = Path(request.executable_path).expanduser()
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="The selected llama-server executable does not exist")
+    if candidate.name.casefold() != "llama-server.exe":
+        raise HTTPException(status_code=422, detail="Select the llama-server.exe executable")
+    candidate = candidate.resolve()
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
+    installer_service._registry_init()
+    with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+        db.execute(
+            "INSERT INTO installer_settings(key,value_json,updated_at) VALUES('runtime_executable',?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+            (json.dumps({"path": str(candidate)}), time.time()),
+        )
+    LLAMA_SERVER_EXE = str(candidate)
+    return {"executable_path": LLAMA_SERVER_EXE, "exists": True, "saved": True}
+
