@@ -321,7 +321,62 @@ async def get_catalog() -> dict[str, Any]:
             "installed_path": str(path) if path.is_file() else None,
             "estimated_weight_gb": round(entry["parameters_b"] * 0.75, 2),
         })
-    return {"hardware": hardware, "models": models, "source": "curated catalog; file metadata verified against Hugging Face when downloading"}
+    known_ids = {item["id"] for item in CATALOG}
+    for model_id, item in installed.items():
+        metadata = item.get("metadata") or {}
+        if model_id in known_ids or metadata.get("source") != "local":
+            continue
+        size_gb = round(item["size_bytes"] / (1024 ** 3), 2)
+        models.append({
+            "id": model_id, "name": Path(item["filename"]).stem,
+            "repo_id": "local-file", "filename": item["filename"],
+            "family": "Local GGUF", "parameters_b": round(size_gb / 0.75, 2),
+            "quantization": "unknown", "context_default": 4096,
+            "purpose": "Existing local model", "license": "User supplied",
+            "minimum_ram_gb": 0, "recommended_ram_gb": 0,
+            "minimum_vram_gb": 4, "recommended_vram_gb": 6,
+            "recommendation": "unknown",
+            "reasons": ["Local model discovered in the Brahma Desk model directory; origin/license are not independently verified."],
+            "installed": True, "installed_path": item["path"],
+            "estimated_weight_gb": size_gb,
+        })
+    return {"hardware": hardware, "models": models, "source": "curated catalog plus locally discovered GGUF models"}
+
+@router.post("/scan-local")
+async def scan_local_models() -> dict[str, Any]:
+    _registry_init()
+    registered = _registry_rows()
+    catalog_paths = {str(_model_path(item["id"]).resolve()).casefold() for item in CATALOG}
+    discovered = []
+    rejected = []
+    for path in MODEL_DIR.glob("*.gguf"):
+        if str(path.resolve()).casefold() in catalog_paths:
+            continue
+        try:
+            if not path.is_file() or path.stat().st_size < 1024 * 1024:
+                rejected.append({"filename": path.name, "reason": "File is too small to be a valid model"})
+                continue
+            with path.open("rb") as stream:
+                if stream.read(4) != GGUF_MAGIC:
+                    rejected.append({"filename": path.name, "reason": "GGUF magic header is missing"})
+                    continue
+            digest = await asyncio.to_thread(_sha256, path)
+            model_id = "local-" + digest[:12]
+            existing = registered.get(model_id)
+            if not existing:
+                entry = {"id": model_id, "repo_id": "local-file"}
+                _register_model(entry, path, path.stat().st_size, digest, True, {
+                    "source": "local", "validation": "GGUF magic and local SHA-256 calculated",
+                    "official_checksum_verified": False, "origin_trusted": False,
+                })
+            discovered.append({
+                "model_id": model_id, "filename": path.name,
+                "path": str(path), "size_bytes": path.stat().st_size,
+                "sha256": digest, "official_checksum_verified": False,
+            })
+        except OSError as exc:
+            rejected.append({"filename": path.name, "reason": str(exc)})
+    return {"discovered": discovered, "rejected": rejected, "directory": str(MODEL_DIR)}
 
 @router.get("/models")
 async def get_registered_models() -> dict[str, Any]:
