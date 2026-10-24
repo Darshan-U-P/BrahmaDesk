@@ -77,6 +77,16 @@ export default function InstallerWizard() {
   const failedJob = jobs.find(job => job.model_id === selected && job.status === "failed");
   const completedJob = jobs.find(job => job.model_id === selected && job.status === "completed");
 
+  async function scanLocalModels() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const result = await api<{ discovered: Array<{ filename: string }>; rejected: Array<{ filename: string; reason: string }> }>("/api/installer/scan-local", { method: "POST" });
+      await refresh();
+      setNotice("Found " + result.discovered.length + " local GGUF model(s)." + (result.rejected.length ? " " + result.rejected.length + " file(s) were skipped." : ""));
+    } catch (e) { setError(e instanceof Error ? e.message : "Local model scan failed."); }
+    finally { setBusy(false); }
+  }
+
   async function beginDownload() {
     if (!chosen) return;
     setBusy(true); setError(""); setNotice("");
@@ -114,7 +124,7 @@ export default function InstallerWizard() {
         <h1>Set up your local AI</h1>
         <p>Check this PC, choose a model that fits, and prepare a local inference configuration.</p>
       </div>
-      <button className="installer-ghost-button" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15}/> Rescan</button>
+      <div className="installer-hero-actions"><button className="installer-ghost-button" onClick={() => void refresh()} disabled={busy}><RefreshCw size={15}/> Rescan hardware</button><button className="installer-ghost-button" onClick={() => void scanLocalModels()} disabled={busy}><HardDrive size={15}/> Scan local GGUF</button></div>
     </div>
 
     <div className="installer-steps" aria-label="Setup progress">
