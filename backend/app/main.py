@@ -567,6 +567,11 @@ app.add_middleware(
 )
 
 
+# Smart installer API routes (hardware, catalog, downloads, validation, inference).
+from .installer import router as installer_router
+app.include_router(installer_router)
+
+
 # ---------------------------------------------------------------------------
 # Health endpoint
 # ---------------------------------------------------------------------------
