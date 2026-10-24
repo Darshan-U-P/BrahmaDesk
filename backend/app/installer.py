@@ -251,7 +251,7 @@ def _recommendation(model: dict[str, Any], hardware: dict[str, Any]) -> tuple[st
     # Approximate Q4 weight footprint plus runtime/KV-cache headroom.
     estimated_ram = model["parameters_b"] * 0.75 + 2.5
     if ram and ram < model["minimum_ram_gb"]:
-        return "unsupported", [f"Detected RAM ({ram} GB) is below the conservative {model['minimum_ram_gb} GB minimum."]
+        return "unsupported", [f"Detected RAM ({ram} GB) is below the conservative {model['minimum_ram_gb']} GB minimum."]
     if free_disk and free_disk < model["parameters_b"] * 0.8:
         reasons.append("Model directory has limited free disk space.")
     if ram and ram < model["recommended_ram_gb"]:
