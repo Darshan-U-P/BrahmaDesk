@@ -35,6 +35,7 @@ declare global {
   interface Window {
     brahmaDesktop?: {
       getVersion: () => Promise<string>;
+      selectLlamaServer?: () => Promise<string | null>;
       updates?: {
         getState: () => Promise<UpdateState>;
         check: () => Promise<UpdateState>;
