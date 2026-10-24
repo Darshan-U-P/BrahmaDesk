@@ -209,6 +209,7 @@ LLAMA_HOST = os.getenv("LLAMA_HOST", "127.0.0.1")
 LLAMA_PORT = int(os.getenv("LLAMA_PORT", "8080"))
 BACKEND_PORT = int(os.getenv("BRAHMA_BACKEND_PORT", "8000"))
 LLAMA_CONTEXT_SIZE = int(os.getenv("LLAMA_CONTEXT_SIZE", "4096"))
+LLAMA_THREADS = int(os.getenv("LLAMA_THREADS", str(max(1, (os.cpu_count() or 4) - 1))))
 LLAMA_GPU_LAYERS = os.getenv("LLAMA_GPU_LAYERS", "20")
 LLAMA_LOAD_MODE = os.getenv("LLAMA_LOAD_MODE", "auto")
 LLAMA_STARTUP_TIMEOUT = float(os.getenv("LLAMA_STARTUP_TIMEOUT", "180"))
@@ -464,10 +465,14 @@ async def start_llama_if_needed() -> None:
         str(executable),
         "-m",
         str(model),
+        "--alias",
+        MODEL_ID,
         "--host",
         LLAMA_HOST,
         "--port",
         str(LLAMA_PORT),
+        "-t",
+        str(LLAMA_THREADS),
         "-c",
         str(LLAMA_CONTEXT_SIZE),
         "-ngl",
@@ -533,6 +538,7 @@ async def start_llama_if_needed() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    await load_saved_llama_server_path()
     await start_llama_if_needed()
 
     try:
@@ -565,6 +571,51 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Content-Type"],
 )
+
+
+# Smart installer API routes (hardware, catalog, downloads, validation, inference).
+if __package__:
+    from .installer import router as installer_router
+else:  # Existing tests import this module as top-level "main".
+    from installer import router as installer_router
+app.include_router(installer_router)
+
+
+async def load_saved_llama_server_path() -> None:
+    """Restore the selected runtime and verified model configuration before startup."""
+    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
+    try:
+        if __package__:
+            from . import installer as installer_service
+        else:
+            import installer as installer_service
+        installer_service._registry_init()
+        with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+            row = db.execute(
+                "SELECT value_json FROM installer_settings WHERE key='runtime_executable'"
+            ).fetchone()
+        if row:
+            saved = json.loads(row[0])
+            candidate = Path(saved.get("path", "")).expanduser()
+            if candidate.is_file() and candidate.name.casefold() == "llama-server.exe":
+                LLAMA_SERVER_EXE = str(candidate.resolve())
+        with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+            row = db.execute(
+                "SELECT value_json FROM installer_settings WHERE key='inference'"
+            ).fetchone()
+        if row:
+            config = json.loads(row[0])
+            registered = installer_service._registry_rows().get(config.get("model_id"))
+            model_path = Path(config.get("model_path", "")).expanduser()
+            if registered and registered.get("verified") and model_path.is_file() and str(model_path.resolve()) == str(Path(registered["path"]).resolve()):
+                LLAMA_MODEL_PATH = str(model_path.resolve())
+                LLAMA_CONTEXT_SIZE = int(config.get("context_size", LLAMA_CONTEXT_SIZE))
+                LLAMA_THREADS = int(config.get("threads", LLAMA_THREADS))
+                LLAMA_GPU_LAYERS = str(config.get("gpu_layers", LLAMA_GPU_LAYERS))
+                MODEL_ID = str(config.get("model_id", MODEL_ID))
+    except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
+        # Keep the environment/default path if no valid saved runtime is available.
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -1412,3 +1463,174 @@ async def set_active_profile(
         profile = get_profile_or_404(db, request.profile_id)
     write_active_profile_id(profile["id"])
     return profile
+
+
+@app.post("/api/installer/activate/{model_id}")
+async def activate_installer_model(model_id: str) -> dict[str, Any]:
+    """Apply a registered model and prove it can generate a short response.
+
+    An already-running llama.cpp process not owned by this backend is never
+    stopped or reconfigured. The user must stop that external server manually
+    before activating a different model through Brahma Desk.
+    """
+    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
+    global llama_process, llama_process_owned, llama_start_error
+
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
+
+    registered = installer_service._registry_rows().get(model_id)
+    if not registered or not registered.get("verified"):
+        raise HTTPException(status_code=409, detail="Model must be downloaded and verified before activation")
+    model_path = Path(registered["path"])
+    if not model_path.is_file():
+        raise HTTPException(status_code=404, detail="Registered model file is missing")
+
+    saved = await installer_service.get_inference_configuration()
+    config = saved.get("config")
+    if not config or config.get("model_id") != model_id:
+        raise HTTPException(status_code=409, detail="Configure this model before activation")
+
+    async with shutdown_lock:
+        server_ready = await llama_is_ready()
+        if server_ready and not llama_process_owned:
+            raise HTTPException(
+                status_code=409,
+                detail="A llama.cpp server already running outside Brahma Desk. It was left untouched. Stop that server yourself, then retry activation.",
+            )
+
+        if llama_process_owned and llama_process is not None:
+            same_model = Path(LLAMA_MODEL_PATH).resolve() == model_path.resolve()
+            same_config = (
+                LLAMA_CONTEXT_SIZE == int(config["context_size"])
+                and str(LLAMA_GPU_LAYERS) == str(config["gpu_layers"])
+            )
+            if not (server_ready and same_model and same_config):
+                stop_owned_llama()
+
+        LLAMA_MODEL_PATH = str(model_path)
+        LLAMA_CONTEXT_SIZE = int(config["context_size"])
+        LLAMA_THREADS = int(config["threads"])
+        LLAMA_GPU_LAYERS = str(config["gpu_layers"])
+        MODEL_ID = model_id
+
+        if not await llama_is_ready():
+            await start_llama_if_needed()
+
+    if not await llama_is_ready():
+        raise HTTPException(
+            status_code=502,
+            detail=llama_start_error or "llama.cpp did not become ready with the selected model",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(
+                f"{LLAMA_BASE_URL}/v1/chat/completions",
+                json={
+                    "model": MODEL_ID,
+                    "messages": [{"role": "user", "content": "Reply with the word READY."}],
+                    "max_tokens": 12,
+                    "temperature": 0,
+                    "stream": False,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            choices = payload.get("choices") or []
+            answer = choices[0].get("message", {}).get("content", "") if choices else ""
+            if not isinstance(answer, str) or not answer.strip():
+                raise ValueError("The model returned no text")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Model server started but the generation smoke test failed: {exc}",
+        ) from exc
+
+    return {
+        "status": "activated",
+        "model_id": model_id,
+        "model_path": str(model_path),
+        "runtime": "llama.cpp",
+        "generation_test": "passed",
+        "sample_output": answer.strip()[:160],
+        "context_size": LLAMA_CONTEXT_SIZE,
+        "gpu_layers": LLAMA_GPU_LAYERS,
+    }
+
+
+class InstallerRuntimePathRequest(BaseModel):
+    executable_path: str = Field(min_length=1, max_length=2048)
+
+
+@app.get("/api/installer/runtime")
+async def get_installer_runtime() -> dict[str, Any]:
+    global LLAMA_SERVER_EXE
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
+    try:
+        installer_service._registry_init()
+        with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+            row = db.execute("SELECT value_json FROM installer_settings WHERE key='runtime_executable'").fetchone()
+        if row:
+            saved = json.loads(row[0])
+            saved_path = saved.get("path")
+            if saved_path and Path(saved_path).is_file():
+                LLAMA_SERVER_EXE = str(Path(saved_path).resolve())
+    except (sqlite3.Error, ValueError, TypeError):
+        pass
+    return {
+        "executable_path": LLAMA_SERVER_EXE,
+        "exists": Path(LLAMA_SERVER_EXE).is_file(),
+        "runtime": "llama.cpp",
+        "note": "If no runtime is found, Brahma Desk installs the official Windows x64 CPU build automatically, or you can select an existing compatible llama-server.exe.",
+    }
+
+@app.post("/api/installer/runtime/install")
+async def install_installer_runtime() -> dict[str, Any]:
+    """Install the latest official llama.cpp Windows x64 CPU runtime on demand."""
+    global LLAMA_SERVER_EXE
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
+    installed = await installer_service.install_llama_cpu_runtime()
+    candidate = Path(installed["executable_path"]).resolve()
+    installer_service._registry_init()
+    with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+        db.execute(
+            "INSERT INTO installer_settings(key,value_json,updated_at) VALUES('runtime_executable',?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+            (json.dumps({"path": str(candidate), "version": installed.get("version"), "source": "official-github-release"}), time.time()),
+        )
+    LLAMA_SERVER_EXE = str(candidate)
+    return {**installed, "executable_path": LLAMA_SERVER_EXE, "exists": True, "saved": True, "runtime": "llama.cpp"}
+
+
+@app.post("/api/installer/runtime")
+async def set_installer_runtime(request: InstallerRuntimePathRequest) -> dict[str, Any]:
+    global LLAMA_SERVER_EXE
+    candidate = Path(request.executable_path).expanduser()
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="The selected llama-server executable does not exist")
+    if candidate.name.casefold() != "llama-server.exe":
+        raise HTTPException(status_code=422, detail="Select the llama-server.exe executable")
+    candidate = candidate.resolve()
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
+    installer_service._registry_init()
+    with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+        db.execute(
+            "INSERT INTO installer_settings(key,value_json,updated_at) VALUES('runtime_executable',?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+            (json.dumps({"path": str(candidate)}), time.time()),
+        )
+    LLAMA_SERVER_EXE = str(candidate)
+    return {"executable_path": LLAMA_SERVER_EXE, "exists": True, "saved": True}
+

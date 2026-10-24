@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("brahmaDesktop", {
   getVersion: () => ipcRenderer.invoke("app:version"),
+  selectLlamaServer: () => ipcRenderer.invoke("dialog:select-llama-server"),
   updates: {
     getState: () => ipcRenderer.invoke("updates:get-state"),
     check: () => ipcRenderer.invoke("updates:check"),
