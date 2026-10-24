@@ -1,50 +1,54 @@
 # Brahma Desk
 
-Brahma Desk is a local-first Windows desktop application for chatting with a locally hosted language model. The desktop app is built with Electron, React, TypeScript, and Vite. A FastAPI backend manages local inference through llama.cpp and persists conversations and workspace data in SQLite.
+Brahma Desk is a local-first Windows desktop application for chatting with a locally hosted language model. It uses Electron, React, TypeScript, and Vite for the desktop interface, with a FastAPI backend, llama.cpp for local inference, and SQLite for persistent conversations and workspace data.
 
-The project is designed for a single machine and does not currently provide cloud chat synchronization or account sign-in.
+The project is designed for a single machine. It does not currently provide cloud chat synchronization or account sign-in.
 
-## What it does
+## What It Does
 
-- Streams assistant responses from a llama.cpp server that implements the OpenAI-compatible chat completions API.
-- Persists conversations, titles, and messages in SQLite; supports listing, reopening, renaming, editing user messages, regenerating answers, importing, and deleting conversations.
-- Provides local profiles with profile-specific chats and personalization settings. The backend checks profile ownership when conversations are accessed or changed.
-- Includes database tables for projects, notes, and global or project-scoped memories. The current backend exposes global memory management per profile, but does not yet expose project/note CRUD endpoints or a project-management screen.
-- Retrieves relevant active memories, profile-owned project context when present in the database, and earlier messages from the current conversation, subject to a bounded context budget.
-- Exposes model sampling controls and reasoning/thinking preferences in the desktop interface.
-- Includes a user-controlled Update Center for checking, downloading, and installing releases in packaged builds. Automatic download and automatic installation on quit are disabled.
-- Can package the desktop app as a Windows x64 NSIS installer with the FastAPI backend executable.
+- Streams assistant responses from a llama.cpp server implementing the OpenAI-compatible Chat Completions API.
+- Stores conversations, titles, and messages in SQLite.
+- Supports conversation listing, reopening, renaming, message editing, answer regeneration, importing, and deletion.
+- Provides local profiles with profile-specific conversations and personalization settings.
+- Enforces profile ownership when accessing or modifying conversations.
+- Includes database structures for projects, notes, and global or project-scoped memories.
+- Retrieves relevant active memories, available project context, and earlier conversation messages within a bounded context budget.
+- Exposes model sampling controls and reasoning preferences in the desktop interface.
+- Includes a user-controlled Update Center for checking, downloading, and installing packaged releases.
+- Packages the desktop application and FastAPI backend into a Windows x64 NSIS installer.
 
-The llama.cpp executable and GGUF model are not bundled. They must be provided and configured on each machine running the backend.
+The llama.cpp executable and GGUF model are not bundled. They must be supplied and configured on each machine.
 
-## Project layout
+## Project Layout
 
 | Path | Description |
-| --- | --- |
-| `backend/app/main.py` | FastAPI app, SQLite initialization and migrations, profile/conversation/memory APIs, context building, and llama.cpp process management |
-| `backend/app/tests/` | Pytest regression tests for settings, persistence, process restart, profile isolation, model health recovery, and chat stream failures |
-| `backend/requirements.txt` | Python runtime dependencies |
-| `backend/build_backend.ps1` | Builds `backend\dist\brahma-backend.exe` with PyInstaller |
+|---|---|
+| `backend/app/main.py` | FastAPI APIs, SQLite initialization and migrations, profile and conversation management, memory handling, context assembly, and llama.cpp process management |
+| `backend/app/tests/` | Backend regression tests |
+| `backend/requirements.txt` | Python dependencies |
+| `backend/build_backend.ps1` | Builds the backend executable using PyInstaller |
 | `desktop/src/` | React and TypeScript interface |
-| `desktop/electron/` | Electron main process, lifecycle and updater IPC, and preload bridge |
-| `desktop/e2e/` | Playwright-based Electron UI test runner |
-| `Test-BrahmaDesk-E2E.ps1` | Runs focused backend tests, builds the desktop app, checks backend/model health, and runs Electron UI tests |
-| `Test-BrahmaDesk-Backend.ps1` | Backend API smoke test, with optional live chat and memory checks |
+| `desktop/electron/` | Electron main process, lifecycle, updater IPC, and preload bridge |
+| `desktop/e2e/` | Playwright-based Electron UI tests |
+| `Test-BrahmaDesk-E2E.ps1` | Runs selected backend tests, builds the desktop application, checks backend/model health, and runs UI tests |
+| `Test-BrahmaDesk-Backend.ps1` | Backend API smoke tests |
 
 ## Requirements
 
 - Windows 10/11 and PowerShell
-- Python 3.10 or later for backend development; Python 3.12 is used by the backend packaging script
+- Python 3.10 or later for backend development
+- Python 3.12 for the configured backend packaging workflow
 - Node.js and npm
-- A compatible llama.cpp `llama-server` executable and GGUF model
+- A compatible llama.cpp `llama-server` executable
+- A compatible GGUF model
 
-The E2E suite also requires the project Python dependencies, Playwright/Electron desktop dependencies, and a working local model for its live chat check.
+The end-to-end test suite also requires the project dependencies and a working local model for its live chat test.
 
-## Configure and run from source
+## Configure and Run from Source
 
-### 1. Prepare the backend
+### 1. Prepare the Backend
 
-Open PowerShell at the project root:
+From the project root:
 
 ```powershell
 Set-Location .\backend
@@ -54,7 +58,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Set the locations of the local inference executable and model. The source currently contains developer-machine fallback paths; override them for your system:
+Configure your local inference executable and model:
 
 ```powershell
 $env:LLAMA_SERVER_EXE = "C:\path\to\llama-server.exe"
@@ -67,11 +71,13 @@ Start the API:
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-On startup the backend reuses a ready llama.cpp server at `LLAMA_BASE_URL`. If none is ready, it attempts to start the configured executable and model. The health endpoint is <http://127.0.0.1:8000/api/health>. Its response reports backend status, model-server status, model ID, whether the model is managed by this backend, and startup errors.
+Health endpoint: http://127.0.0.1:8000/api/health
 
-### 2. Prepare and start the desktop app
+The backend reuses a ready llama.cpp server at `LLAMA_BASE_URL`. If no ready server is available, it attempts to start the configured executable and model.
 
-In a second PowerShell window at the project root:
+### 2. Prepare the Desktop Application
+
+Open a second PowerShell window at the project root:
 
 ```powershell
 Set-Location .\desktop
@@ -79,66 +85,73 @@ npm ci
 npm run dev
 ```
 
-The desktop development server and backend are intended to listen on loopback addresses. Keep the backend running while using the development app. The renderer currently targets `http://127.0.0.1:8000`; if you change the backend port, update the renderer's API base URL to match.
+The development frontend targets `http://127.0.0.1:8000`. Keep the backend running while using the development application.
 
 ## Configuration
 
 | Variable | Purpose | Default |
-| --- | --- | --- |
-| `BRAHMA_DATA_DIR` | Override the local data directory | `%APPDATA%\brahma-desk` on Windows |
-| `BRAHMA_BACKEND_PORT` | Backend port (also passed by Electron to the packaged backend) | `8000` |
+|---|---|---|
+| `BRAHMA_DATA_DIR` | Override the local data directory | `%APPDATA%\brahma-desk` |
+| `BRAHMA_BACKEND_PORT` | Backend port | `8000` |
 | `LLAMA_BASE_URL` | llama.cpp API base URL | `http://127.0.0.1:8080` |
-| `LLAMA_SERVER_EXE` | Path to llama.cpp server executable | Developer-machine path in source |
-| `LLAMA_MODEL_PATH` | Path to GGUF model | Developer-machine path in source |
-| `LLAMA_HOST` / `LLAMA_PORT` | Bind address and port if the backend starts llama.cpp | `127.0.0.1` / `8080` |
+| `LLAMA_SERVER_EXE` | Path to the llama.cpp server executable | Developer-machine fallback in source |
+| `LLAMA_MODEL_PATH` | Path to the GGUF model | Developer-machine fallback in source |
+| `LLAMA_HOST` | Bind address for a backend-managed model server | `127.0.0.1` |
+| `LLAMA_PORT` | Port for a backend-managed model server | `8080` |
 | `LLAMA_CONTEXT_SIZE` | llama.cpp context size | `4096` |
 | `LLAMA_GPU_LAYERS` | Number of GPU layers passed to llama.cpp | `20` |
-| `LLAMA_LOAD_MODE` | llama.cpp load mode | `auto` |
-| `LLAMA_STARTUP_TIMEOUT` | Seconds to wait for a newly started model server | `180` |
+| `LLAMA_LOAD_MODE` | Model loading mode | `auto` |
+| `LLAMA_STARTUP_TIMEOUT` | Startup timeout in seconds | `180` |
 | `LLAMA_MODEL_ID` | Fallback model identifier | `local-model` |
-| `BRAHMA_CONTEXT_TOKEN_BUDGET` | Approximate budget for context assembly | `3000` (minimum `1200`) |
+| `BRAHMA_CONTEXT_TOKEN_BUDGET` | Approximate context assembly budget | `3000`, minimum `1200` |
 
-The backend passes `--no-webui` when it starts llama.cpp. Use a llama.cpp build that supports this option.
+The backend passes `--no-webui` when it starts llama.cpp. Use a compatible llama.cpp build that supports this option.
 
-## Local data and privacy
+## Local Data and Privacy
 
-On Windows, the SQLite database (`brahma_desk.sqlite3`) and active profile selection are stored under `%APPDATA%\brahma-desk` by default. `BRAHMA_DATA_DIR` changes the backend data directory. The packaged Electron app also uses the `brahma-desk` directory under the Windows application data path and passes it to its backend process.
+By default, the SQLite database, `brahma_desk.sqlite3`, and active profile selection are stored under `%APPDATA%\brahma-desk`. The `BRAHMA_DATA_DIR` environment variable overrides the backend data directory.
 
-The database contains local conversations, profiles, profile settings, projects, notes, and memories. Back up this directory before testing migrations or manually modifying data. The app does not upload this data to a cloud service.
+The database stores local conversations, profiles, settings, projects, notes, and memories. Back up the data directory before testing migrations or manually changing database contents.
 
-Profiles provide application-level data separation, not operating-system authentication. The backend is intended for local use and must not be exposed to an untrusted network without adding appropriate authentication and security controls.
+Brahma Desk does not upload this data to a cloud service as part of its documented local workflow.
 
-## Backend API overview
+Profiles provide application-level data separation, not operating-system authentication. The backend is intended for local use and should not be exposed to untrusted networks without appropriate authentication and security controls.
 
-The interactive OpenAPI description is available at <http://127.0.0.1:8000/docs> while the backend is running.
+## Backend API Overview
+
+The interactive API documentation is available at http://127.0.0.1:8000/docs while the backend is running.
 
 | Endpoint | Purpose |
-| --- | --- |
+|---|---|
 | `GET /api/health` | Backend and model-server status |
-| `POST /api/chat/stream` | Stream a chat completion using server-sent events |
+| `POST /api/chat/stream` | Stream chat completions using server-sent events |
 | `GET`, `POST /api/conversations` | List and create profile-owned conversations |
-| `GET`, `PATCH`, `DELETE /api/conversations/{conversation_id}` | Load, rename, and delete an owned conversation |
-| `PATCH /api/conversations/{conversation_id}/messages/{message_id}` | Edit a user message and remove later messages |
-| `POST /api/conversations/import` | Import a conversation and its messages |
-| `GET`, `POST /api/memories` | List and create/update profile-scoped global memories |
+| `GET`, `PATCH`, `DELETE /api/conversations/{conversation_id}` | Read, rename, and delete owned conversations |
+| `PATCH /api/conversations/{conversation_id}/messages/{message_id}` | Edit a user message and remove subsequent messages |
+| `POST /api/conversations/import` | Import conversations and messages |
+| `GET`, `POST /api/memories` | List and create or update profile-scoped global memories |
 | `DELETE /api/memories/{memory_id}` | Delete an owned global memory |
 | `GET`, `POST /api/profiles` | List and create profiles |
 | `GET`, `PATCH`, `DELETE /api/profiles/{profile_id}` | Read, update, and delete profiles |
-| `GET`, `PUT /api/profiles/{profile_id}/settings` | Read and update profile personalization settings |
+| `GET`, `PUT /api/profiles/{profile_id}/settings` | Read and update personalization settings |
 | `GET`, `PUT /api/active-profile` | Read or change the active profile |
-| `POST /api/shutdown` | Request a controlled backend/model shutdown when a shutdown token is configured |
+| `POST /api/shutdown` | Request controlled backend/model shutdown when a shutdown token is configured |
 
-### Streaming failure behavior
+Project and note database structures exist, but project/note CRUD endpoints and a project-management screen are not yet implemented.
 
-Chat responses use server-sent events. The API may already have returned HTTP 200 when a model or stream error occurs; clients must inspect the SSE events for an `error` field and treat the response as incomplete. The backend persists the exchange only after it receives the upstream `[DONE]` marker. Connection failures, upstream HTTP errors, read errors, and unexpected end-of-stream must not be treated as successful completed answers.
+### Streaming Failure Behavior
 
-The desktop UI displays a connection error when it receives an error event; some partial deltas may already have appeared in the active view. It may create an empty conversation record before sending the request; an incomplete request must not create persisted user/assistant message rows or a successful completion record.
+Chat responses use server-sent events (SSE). An HTTP 200 response does not necessarily mean the model completed successfully. Clients must inspect SSE events for an `error` field and treat incomplete streams as failures.
 
-## Tests and checks
+The backend persists the exchange only after receiving the upstream `[DONE]` marker. Connection failures, upstream HTTP errors, read errors, and unexpected end-of-stream must not be treated as completed answers.
 
-### Backend regression tests
+Partial text may already have appeared in the interface when an error occurs. An incomplete request must not be recorded as a successfully completed exchange.
 
-From the project root, activate the backend environment and run:
+## Tests and Checks
+
+### Backend Regression Tests
+
+From the project root:
 
 ```powershell
 Set-Location .\backend
@@ -147,7 +160,7 @@ Set-Location ..
 python -m pytest .\backend\app\tests -q
 ```
 
-These tests cover settings and payload validation, SQLite conversation operations, persistence across separate backend processes, cross-profile conversation isolation, health recovery after model outages, and chat stream error/incomplete-stream behavior. Tests use local test data and mocked model calls where possible.
+These tests cover settings and payload validation, SQLite persistence, process restarts, profile isolation, model health recovery, and stream-failure behavior.
 
 The separate memory regression suite can be run with:
 
@@ -155,24 +168,20 @@ The separate memory regression suite can be run with:
 python -m unittest discover -s .\backend\tests -p "test_memory.py"
 ```
 
-### Desktop production build
+### Desktop Production Build
 
 ```powershell
 Set-Location .\desktop
 npm run build
 ```
 
-This runs the TypeScript project build and Vite production build.
-
-### Electron UI and live-model end-to-end test
-
-The test runner can run focused settings tests, build the desktop app, reuse a healthy backend or start one, and exercise the Electron UI against the configured live model:
+### Electron End-to-End Tests
 
 ```powershell
 .\Test-BrahmaDesk-E2E.ps1
 ```
 
-Options:
+Available options:
 
 ```powershell
 .\Test-BrahmaDesk-E2E.ps1 -SkipBuild
@@ -180,45 +189,45 @@ Options:
 .\Test-BrahmaDesk-E2E.ps1 -KeepStartedBackend
 ```
 
-The script currently runs `test_settings_pipeline.py` rather than the complete backend regression suite. Run the pytest command above separately for persistence, ownership, and stream-failure coverage. The UI E2E includes a real model request and can take up to two minutes; model/server behavior can affect its result. Screenshots and logs are saved under test-results directories.
+The script runs selected backend tests, builds the application, and exercises the UI against the configured live model. The live model request can take up to two minutes.
 
-### Backend API smoke test
+### Backend API Smoke Test
 
-Start the backend first, then from the project root:
+Start the backend, then run from the project root:
 
 ```powershell
 .\Test-BrahmaDesk-Backend.ps1
 ```
 
-This script checks the OpenAPI document, health, safe GET routes, and a temporary conversation CRUD lifecycle. Live chat and memory listing are optional:
+Optional chat and memory checks:
 
 ```powershell
 .\Test-BrahmaDesk-Backend.ps1 -IncludeChat -IncludeMemoryTests
 ```
 
-The memory smoke option lists memories only; it intentionally skips writes/deletes to avoid changing persistent user data.
+The memory smoke option lists memories only; it avoids writes and deletes.
 
-### Standalone Electron UI test
+### Standalone Electron UI Tests
 
-With a healthy backend and model already running:
+With a healthy backend and model running:
 
 ```powershell
 Set-Location .\desktop
 .\RUN-UI-TESTS.ps1
 ```
 
-The runner starts its own Vite/Electron test instance and writes screenshots under `desktop\test-results\e2e`. Do not run another Vite development instance on the same port at the same time.
+The runner starts its own Vite/Electron test instance and saves screenshots under `desktop\test-results\e2e`. Avoid running another Vite instance on the same port simultaneously.
 
-## Build a Windows installer
+## Build a Windows Installer
 
-Build the backend executable first:
+Build the backend executable:
 
 ```powershell
 Set-Location .\backend
 .\build_backend.ps1
 ```
 
-Then build the desktop app and installer:
+Build the desktop application and Windows installer:
 
 ```powershell
 Set-Location ..\desktop
@@ -227,23 +236,84 @@ npm run build
 npm run dist:win
 ```
 
-The installer and supporting update metadata are written under `desktop\release\`. The NSIS installer is configured for Windows x64 and preserves the user-data directory when the app is uninstalled.
+The installer and update metadata are generated under `desktop\release\`. The NSIS installer targets Windows x64 and is configured to preserve user data when the application is uninstalled.
 
-The build publishes updates from the GitHub repository configured in `desktop\package.json` (`Darshan-U-P/BrahmaDesk`). Publishing requires a versioned GitHub Release and the electron-builder update files, including `latest.yml`. Configure release credentials through a secure environment or CI secret; **never put a GitHub token in `package.json` or source control**. Test update checks, downloads, and installation with a packaged release before distributing them.
+The installer does not bundle the GGUF model or `llama-server`; their paths must be configured on the target PC.
 
-Neither the model nor `llama-server` is included in the installer. Their paths must be made available on the target PC. Unsigned Windows installers may show SmartScreen warnings.
+### Releases and Updates
 
-## Known limitations
+The Update Center supports user-controlled update checks, downloads, and installation in packaged builds. Automatic downloading and automatic installation on application quit are disabled.
 
-- Context selection uses a character-based approximation, not the model's tokenizer or semantic/vector search.
-- Reasoning levels are prompt/template preferences, not portable hard limits on internal reasoning tokens. The `Off` option depends on the model chat template and llama.cpp version.
-- `--no-webui` is required by the backend's model startup command and must be supported by the installed llama.cpp binary.
-- Update downloads and installation require a packaged build and correctly published GitHub release metadata.
-- The backend API's profile separation is not a substitute for authentication if the service is made remotely accessible.
-- A passing unit test suite does not prove the configured model, llama.cpp flags, installer, or published update feed works on every target machine; run the desktop build and relevant live smoke tests before release.
+The configured GitHub repository is `Darshan-U-P/BrahmaDesk`. Publishing an update requires a versioned GitHub Release and the electron-builder update metadata, including `latest.yml`.
+
+Keep release credentials in secure environment variables or CI secrets. Never commit GitHub tokens, private signing keys, PFX certificates, or certificate passwords.
+
+Test update checks, downloads, and installation with a packaged release before distributing an update. Unsigned Windows installers may trigger Microsoft Defender SmartScreen warnings.
+
+## Upcoming Updates
+
+The following improvements are proposed for upcoming development. They are not claims about functionality currently available in the application.
+
+- **Project and Notes Management:** Add frontend screens and backend CRUD APIs for creating, viewing, editing, and deleting projects and notes.
+- **Improved Memory Retrieval:** Improve how relevant profile memories and project context are selected and incorporated into prompts.
+- **Model Configuration:** Make local model setup easier, including executable/model path selection, connection checks, and clearer startup diagnostics.
+- **Update Center Improvements:** Improve update error messages, download progress, release information, and recovery from failed update attempts.
+- **Release Signing:** Add a repeatable code-signing workflow for packaged Windows executables and installers. Initially, this may use a self-signed certificate for development and testing; public distribution will require a certificate trusted by Windows.
+- **Backup and Restore:** Provide a safer way to export, back up, and restore local conversations and profile data.
+- **Expanded Regression Coverage:** Extend automated testing for project operations, memory behavior, model configuration, and packaged update workflows.
+- **Installation and First-Run Experience:** Improve initial setup guidance so users can configure llama.cpp and their GGUF model more easily.
+
+## Future Roadmap
+
+Brahma Desk aims to evolve into a more complete local AI workspace while retaining its local-first design.
+
+### Phase 1 — Stability and Reliability
+
+- Improve installer and update reliability.
+- Strengthen error handling and diagnostic logging.
+- Expand backend, desktop, and end-to-end regression tests.
+- Improve first-run setup and model health checks.
+
+### Phase 2 — Workspace and Memory
+
+- Implement project and note management.
+- Improve project-scoped context and memory retrieval.
+- Add reliable local backup, export, and restore workflows.
+- Improve conversation search and workspace organization.
+
+### Phase 3 — Local Model Experience
+
+- Improve model selection and configuration.
+- Provide clearer information about context size, GPU offloading, and model availability.
+- Improve compatibility checks for llama.cpp builds and GGUF models.
+- Explore optional support for additional local inference backends.
+
+### Phase 4 — Advanced AI Workspace
+
+- Explore document-aware chat and local knowledge retrieval.
+- Explore workspace-aware assistance across conversations, notes, and projects.
+- Investigate optional developer tools and productivity workflows.
+- Evaluate additional local-first AI features based on testing and user feedback.
+
+Roadmap priorities may change as development progresses. Planned features will be marked as implemented only after they are developed and tested.
+
+## Known Limitations
+
+- Context selection uses a character-based approximation rather than the model's tokenizer or semantic/vector search.
+- Reasoning levels are prompt/template preferences, not portable hard limits on internal reasoning tokens. The `Off` option depends on the model's chat template and llama.cpp version.
+- The backend requires a compatible llama.cpp binary supporting `--no-webui`.
+- Project and note database structures exist, but their management APIs and UI are incomplete.
+- Update checks, downloads, and installation require a packaged build and correctly published GitHub release metadata.
+- Self-signed certificates do not establish public trust and will not reliably eliminate SmartScreen warnings.
+- Profile separation is not a replacement for authentication when exposing the backend remotely.
+- Passing unit tests does not guarantee that every model, llama.cpp configuration, installer, or published update works on every target machine. Run relevant build, integration, and live smoke tests before each release.
 
 ## Documentation
 
 - [E2E Automation](documentation/README-E2E-AUTOMATION.md)
 - [Update Center Mini-Update](documentation/UPDATE-CENTER-MINI-UPDATE.md)
 - [Patch Notes](documentation/PATCH-NOTES.md)
+
+## Contributing and Feedback
+
+Bug reports, feature suggestions, and improvement ideas are welcome. When reporting a problem, include the Brahma Desk version, relevant logs, operating system details, and steps to reproduce the issue. Do not include API credentials, private keys, certificate passwords, or other secrets.
