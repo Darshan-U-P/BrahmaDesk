@@ -193,6 +193,37 @@ def _registry_init() -> None:
         db.execute("""CREATE TABLE IF NOT EXISTS installer_settings (
             key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at REAL NOT NULL
         )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS installer_download_jobs (
+            job_id TEXT PRIMARY KEY, status TEXT NOT NULL, job_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        )""")
+
+def _persist_job(job: dict[str, Any]) -> None:
+    _registry_init()
+    with sqlite3.connect(REGISTRY_DB, timeout=10) as db:
+        db.execute(
+            """INSERT INTO installer_download_jobs(job_id,status,job_json,updated_at)
+               VALUES(?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET
+               status=excluded.status, job_json=excluded.job_json, updated_at=excluded.updated_at""",
+            (job["id"], job["status"], json.dumps(job), time.time()),
+        )
+
+def _hydrate_jobs() -> None:
+    _registry_init()
+    with sqlite3.connect(REGISTRY_DB, timeout=10) as db:
+        rows = db.execute("SELECT job_id,job_json FROM installer_download_jobs").fetchall()
+    for job_id, encoded in rows:
+        if job_id in DOWNLOADS:
+            continue
+        try:
+            job = json.loads(encoded)
+        except (TypeError, ValueError):
+            continue
+        if job.get("status") in {"queued", "downloading"}:
+            job["status"] = "failed"
+            job["error"] = "Download was interrupted when Brahma Desk closed. Retry to resume from the partial file."
+            _persist_job(job)
+        DOWNLOADS[job_id] = job
 
 def _registry_rows() -> dict[str, dict[str, Any]]:
     _registry_init()
