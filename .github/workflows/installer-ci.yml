@@ -1,0 +1,56 @@
+name: Smart installer CI
+
+on:
+  push:
+    branches:
+      - main
+      - docs/m0-repository-audit-m1-hardware-design
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  backend-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt pytest
+      - name: Run backend tests
+        working-directory: backend
+        run: python -m pytest app/tests tests -q
+
+  desktop-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Build React and TypeScript
+        working-directory: desktop
+        run: npm run build
+
+  packaged-backend:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build packaged backend executable
+        shell: pwsh
+        run: ./backend/build_backend.ps1
