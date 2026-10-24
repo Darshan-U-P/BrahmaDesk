@@ -44,6 +44,35 @@ jobs:
         working-directory: desktop
         run: npm run build
 
+
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Build backend executable
+        shell: pwsh
+        run: ./backend/build_backend.ps1
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Build Windows NSIS installer
+        working-directory: desktop
+        run: npm run dist:win
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrahmaDesk-Windows-Installer
+          path: desktop/release/*.exe
+          if-no-files-found: error
+
   packaged-backend:
     runs-on: windows-latest
     steps:
