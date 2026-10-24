@@ -1,0 +1,91 @@
+
+node_modules/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vite/
+.next/
+coverage/
+dist/
+release/
+releases/
+out/
+test-results/
+playwright-report/
+*.pyc
+*.pyo
+*.log
+*.tmp
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+*.gguf
+
+# Generated builds and dependencies
+**/node_modules/
+**/dist/
+**/release/
+**/releases/
+**/out/
+**/.venv/
+**/venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.vite/
+**/coverage/
+**/test-results/
+**/playwright-report/
+**/*.tsbuildinfo
+
+# Local databases, caches and logs
+**/Cache/
+**/Code Cache/
+**/GPUCache/
+**/Local Storage/
+**/Session Storage/
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+**/*.pyc
+**/*.pyo
+
+# Local models and secrets
+**/*.gguf
+.env
+.env.*
+!.env.example
+
+# Backups and accidental artifacts
+backend/backups/
+rollback-backups/
+
+# Runtime data and test fixtures
+backend/data/
+backend/app/tests/.test-data/
+backend/backups/
+rollback-backups/
+
+# Python build artifacts
+**/build/
+**/*.spec
+
+# Local backup copies
+*.bak
+*.oauth-backup
+*.before-markdown-fix
+
+# Accidental file
+/e --show-toplevel
+
+# Timestamped backup files
+*.bak-*
