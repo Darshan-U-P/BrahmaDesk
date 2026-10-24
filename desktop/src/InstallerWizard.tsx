@@ -16,7 +16,7 @@ type Model = {
   reasons: string[]; installed: boolean; installed_path: string | null; estimated_weight_gb: number;
 };
 type Job = { id: string; model_id: string; name: string; status: string; progress: number; created_at?: number; error?: string | null; path?: string };
-type Runtime = { executable_path: string; exists: boolean; note: string; saved?: boolean };
+type Runtime = { executable_path: string; exists: boolean; note: string; saved?: boolean; version?: string; already_installed?: boolean };
 type ApiError = { detail?: string };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -47,6 +47,7 @@ export default function InstallerWizard() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [runtimeInstallAttempted, setRuntimeInstallAttempted] = useState(false);
   const [step, setStep] = useState<"scan" | "select" | "download" | "configure" | "complete">("scan");
 
   const refresh = useCallback(async () => {
@@ -70,6 +71,12 @@ export default function InstallerWizard() {
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
+    if (runtime && !runtime.exists && !runtimeInstallAttempted) {
+      setRuntimeInstallAttempted(true);
+      void installRuntime();
+    }
+  }, [runtime, runtimeInstallAttempted]);
+  useEffect(() => {
     const timer = window.setInterval(() => {
       void api<{ jobs: Job[] }>("/api/installer/downloads").then(result => setJobs(result.jobs)).catch(() => undefined);
     }, 1500);
@@ -81,6 +88,17 @@ export default function InstallerWizard() {
   const activeJob = latestJob && (latestJob.status === "queued" || latestJob.status === "downloading") ? latestJob : undefined;
   const failedJob = latestJob?.status === "failed" ? latestJob : undefined;
   const completedJob = latestJob?.status === "completed" ? latestJob : undefined;
+
+  async function installRuntime() {
+    if (busy) return;
+    setBusy(true); setError(""); setNotice("Installing the official llama.cpp Windows x64 CPU runtime. This may take a few minutes.");
+    try {
+      const result = await api<Runtime & { version?: string; archive_checksum_verified?: boolean }>("/api/installer/runtime/install", { method: "POST" });
+      setRuntime(result);
+      setNotice("llama.cpp runtime " + (result.version || "") + " installed and validated. " + (result.archive_checksum_verified ? "Release archive SHA-256 verified." : "The release did not publish an archive SHA-256; the executable passed its --version smoke test."));
+    } catch (e) { setError(e instanceof Error ? e.message : "Automatic runtime installation failed. You can select an existing llama-server.exe instead."); }
+    finally { setBusy(false); }
+  }
 
   async function chooseRuntime() {
     setBusy(true); setError(""); setNotice("");
@@ -161,8 +179,8 @@ export default function InstallerWizard() {
     <section className="installer-section installer-runtime-section">
       <div className="installer-section-heading"><div><span className="installer-kicker">RUNTIME</span><h2>llama.cpp engine</h2></div><span className={"installer-tag " + (runtime?.exists ? "recommended" : "unknown")}>{runtime?.exists ? "Found" : "Needs setup"}</span></div>
       <p className="installer-muted">{runtime?.note || "Checking local runtime…"}</p>
-      <div className="installer-runtime-row"><code>{runtime?.executable_path || "Runtime path not available"}</code><button className="installer-ghost-button" onClick={() => void chooseRuntime()} disabled={busy}><HardDrive size={15}/> Choose llama-server.exe</button></div>
-      {!runtime?.exists && <p className="installer-runtime-warning">Model downloads and validation can proceed, but activation requires a compatible llama-server.exe. Brahma Desk will not stop or replace a llama.cpp process it does not own.</p>}
+      <div className="installer-runtime-row"><code>{runtime?.executable_path || "Runtime path not available"}</code><button className="installer-primary" onClick={() => void installRuntime()} disabled={busy}><Download size={15}/>{busy ? "Installing runtime…" : "Install / repair runtime"}</button><button className="installer-ghost-button" onClick={() => void chooseRuntime()} disabled={busy}><HardDrive size={15}/> Choose existing runtime</button></div>
+      {!runtime?.exists && <p className="installer-runtime-warning">Brahma Desk will attempt to install the official Windows x64 CPU runtime automatically. You can also select an existing runtime. It will not stop or replace a llama.cpp process it does not own.</p>}
     </section>
 
     <section className="installer-section">
