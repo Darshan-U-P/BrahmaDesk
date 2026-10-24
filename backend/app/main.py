@@ -1567,13 +1567,28 @@ class InstallerRuntimePathRequest(BaseModel):
 
 @app.get("/api/installer/runtime")
 async def get_installer_runtime() -> dict[str, Any]:
+    global LLAMA_SERVER_EXE
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
+    try:
+        installer_service._registry_init()
+        with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+            row = db.execute("SELECT value_json FROM installer_settings WHERE key='runtime_executable'").fetchone()
+        if row:
+            saved = json.loads(row[0])
+            saved_path = saved.get("path")
+            if saved_path and Path(saved_path).is_file():
+                LLAMA_SERVER_EXE = str(Path(saved_path).resolve())
+    except (sqlite3.Error, ValueError, TypeError):
+        pass
     return {
         "executable_path": LLAMA_SERVER_EXE,
         "exists": Path(LLAMA_SERVER_EXE).is_file(),
         "runtime": "llama.cpp",
-        "note": "If no runtime is found, install the official Windows x64 CPU build automatically, or select an existing compatible llama-server.exe.",
+        "note": "If no runtime is found, Brahma Desk installs the official Windows x64 CPU build automatically, or you can select an existing compatible llama-server.exe.",
     }
-
 
 @app.post("/api/installer/runtime/install")
 async def install_installer_runtime() -> dict[str, Any]:
