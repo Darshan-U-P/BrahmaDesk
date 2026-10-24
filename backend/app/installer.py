@@ -375,11 +375,15 @@ async def _download_job(job_id: str, entry: dict[str, Any], destination: Path) -
                     raise RuntimeError("The server did not honor resume. Retry the download to restart safely.")
                 response.raise_for_status()
                 mode = "ab" if offset else "wb"
+                last_persisted = offset
                 with partial.open(mode) as stream:
                     async for chunk in response.aiter_bytes(1024 * 1024):
                         stream.write(chunk)
                         job["bytes_downloaded"] = stream.tell()
                         job["progress"] = min(99, int(stream.tell() * 100 / total)) if total else 0
+                        if stream.tell() - last_persisted >= 8 * 1024 * 1024:
+                            _persist_job(job)
+                            last_persisted = stream.tell()
         if partial.stat().st_size != total:
             raise RuntimeError(f"Downloaded byte count mismatch: expected {total}, received {partial.stat().st_size}.")
         actual_sha = await asyncio.to_thread(_sha256, partial)
