@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import os
 import platform
@@ -17,6 +18,7 @@ import sqlite3
 import subprocess
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -310,6 +312,90 @@ async def _hf_file_metadata(entry: dict[str, Any]) -> dict[str, Any]:
         "revision": revision,
         "download_url": f"https://huggingface.co/{entry['repo_id']}/resolve/{revision}/{entry['filename']}",
     }
+
+def _select_llama_cpu_asset(release: dict[str, Any]) -> dict[str, Any]:
+    """Select the official Windows x64 CPU archive from a GitHub release."""
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise HTTPException(status_code=502, detail="The llama.cpp release did not contain an asset list")
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "").casefold()
+        url = str(asset.get("browser_download_url") or "")
+        if ("win-cpu-x64" in name or "win-cpu-x64" in url.casefold()) and name.endswith(".zip") and url.startswith("https://github.com/ggml-org/llama.cpp/releases/download/"):
+            return asset
+    raise HTTPException(status_code=502, detail="No official Windows x64 CPU archive was found in the latest llama.cpp release")
+
+
+async def install_llama_cpu_runtime() -> dict[str, Any]:
+    """Download and validate the official llama.cpp Windows x64 CPU release."""
+    if platform.system() != "Windows" or platform.machine().casefold() not in {"amd64", "x86_64"}:
+        raise HTTPException(status_code=422, detail="Automatic runtime installation currently supports Windows x64 only")
+    release_url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20, read=120, write=30, pool=30), follow_redirects=True, headers={"Accept": "application/vnd.github+json", "User-Agent": "BrahmaDesk"}) as client:
+            response = await client.get(release_url)
+            response.raise_for_status()
+            release = response.json()
+            asset = _select_llama_cpu_asset(release)
+            download_url = asset["browser_download_url"]
+            size = int(asset.get("size") or 0)
+            if size <= 0 or size > 500 * 1024 * 1024:
+                raise HTTPException(status_code=502, detail="The selected runtime archive has an unexpected size")
+            archive_response = await client.get(download_url)
+            archive_response.raise_for_status()
+            archive_bytes = archive_response.content
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail=f"Could not download the official llama.cpp CPU runtime: {exc}") from exc
+    if len(archive_bytes) != size:
+        raise HTTPException(status_code=502, detail="llama.cpp archive size did not match the release metadata")
+    expected_digest = str(asset.get("digest") or "")
+    if expected_digest.startswith("sha256:"):
+        actual_digest = hashlib.sha256(archive_bytes).hexdigest()
+        if actual_digest.casefold() != expected_digest.split(":", 1)[1].casefold():
+            raise HTTPException(status_code=502, detail="llama.cpp archive SHA-256 verification failed")
+    else:
+        actual_digest = hashlib.sha256(archive_bytes).hexdigest()
+    tag = re.sub(r"[^A-Za-z0-9._-]", "_", str(release.get("tag_name") or "latest"))
+    runtime_root = DATA_DIR / "runtime" / "llama.cpp" / tag
+    existing = next(runtime_root.rglob("llama-server.exe"), None) if runtime_root.is_dir() else None
+    if existing and existing.is_file():
+        return {"executable_path": str(existing.resolve()), "version": tag, "archive_sha256": actual_digest, "archive_checksum_verified": bool(expected_digest.startswith("sha256:")), "already_installed": True}
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            members = archive.infolist()
+            if len(members) > 10000:
+                raise HTTPException(status_code=502, detail="Runtime archive contains too many entries")
+            for member in members:
+                normalized = member.filename.replace("\\\\", "/")
+                parts = Path(normalized).parts
+                if normalized.startswith("/") or any(part in {"..", ""} for part in parts) or (parts and ":" in parts[0]):
+                    raise HTTPException(status_code=502, detail="Runtime archive contains an unsafe path")
+                target = (runtime_root / normalized).resolve()
+                if not target.is_relative_to(runtime_root.resolve()):
+                    raise HTTPException(status_code=502, detail="Runtime archive path escapes the install directory")
+            archive.extractall(runtime_root)
+    except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
+        shutil.rmtree(runtime_root, ignore_errors=True)
+        raise HTTPException(status_code=502, detail=f"Could not safely extract the llama.cpp runtime: {exc}") from exc
+    executable = next(runtime_root.rglob("llama-server.exe"), None)
+    if not executable or not executable.is_file():
+        shutil.rmtree(runtime_root, ignore_errors=True)
+        raise HTTPException(status_code=502, detail="The downloaded archive did not contain llama-server.exe")
+    try:
+        check = await asyncio.to_thread(subprocess.run, [str(executable), "--version"], capture_output=True, text=True, timeout=20, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError) as exc:
+        shutil.rmtree(runtime_root, ignore_errors=True)
+        raise HTTPException(status_code=502, detail=f"llama-server.exe failed its startup check: {exc}") from exc
+    if check.returncode != 0:
+        shutil.rmtree(runtime_root, ignore_errors=True)
+        raise HTTPException(status_code=502, detail="llama-server.exe failed its --version smoke test")
+    return {"executable_path": str(executable.resolve()), "version": tag, "archive_sha256": actual_digest, "archive_checksum_verified": bool(expected_digest.startswith("sha256:")), "already_installed": False}
+
 
 def _recommendation(model: dict[str, Any], hardware: dict[str, Any]) -> tuple[str, list[str]]:
     ram = hardware.get("ram_gb") or 0
