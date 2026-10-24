@@ -1433,7 +1433,10 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_GPU_LAYERS, MODEL_ID
     global llama_process, llama_process_owned, llama_start_error
 
-    from . import installer as installer_service
+    if __package__:
+        from . import installer as installer_service
+    else:
+        import installer as installer_service
 
     registered = installer_service._registry_rows().get(model_id)
     if not registered or not registered.get("verified"):
