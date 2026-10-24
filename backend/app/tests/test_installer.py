@@ -117,3 +117,22 @@ def test_scan_discovers_model_used_by_running_llama_server(tmp_path: Path, monke
     assert validation["status"] == "valid"
     assert validation["verified"] is True
     assert validation["official_checksum_verified"] is False
+
+
+def test_select_llama_cpu_asset_only_accepts_official_windows_x64_zip() -> None:
+    release = {
+        "assets": [
+            {"name": "llama-b1-bin-win-cuda-12.4-x64.zip", "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b1/cuda.zip"},
+            {"name": "llama-b1-bin-win-cpu-x64.zip", "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b1/cpu.zip", "size": 10},
+            {"name": "llama-b1-bin-win-cpu-x64.zip", "browser_download_url": "https://example.com/cpu.zip", "size": 10},
+        ]
+    }
+    selected = installer._select_llama_cpu_asset(release)
+    assert selected["name"] == "llama-b1-bin-win-cpu-x64.zip"
+    assert selected["browser_download_url"].startswith("https://github.com/ggml-org/llama.cpp/releases/download/")
+
+
+def test_select_llama_cpu_asset_fails_when_no_compatible_asset() -> None:
+    with pytest.raises(HTTPException) as error:
+        installer._select_llama_cpu_asset({"assets": [{"name": "llama-win-cuda.zip", "browser_download_url": "https://github.com/ggml-org/llama.cpp/releases/download/x/cuda.zip"}]})
+    assert error.value.status_code == 502
