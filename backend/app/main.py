@@ -209,6 +209,7 @@ LLAMA_HOST = os.getenv("LLAMA_HOST", "127.0.0.1")
 LLAMA_PORT = int(os.getenv("LLAMA_PORT", "8080"))
 BACKEND_PORT = int(os.getenv("BRAHMA_BACKEND_PORT", "8000"))
 LLAMA_CONTEXT_SIZE = int(os.getenv("LLAMA_CONTEXT_SIZE", "4096"))
+LLAMA_THREADS = int(os.getenv("LLAMA_THREADS", str(max(1, (os.cpu_count() or 4) - 1))))
 LLAMA_GPU_LAYERS = os.getenv("LLAMA_GPU_LAYERS", "20")
 LLAMA_LOAD_MODE = os.getenv("LLAMA_LOAD_MODE", "auto")
 LLAMA_STARTUP_TIMEOUT = float(os.getenv("LLAMA_STARTUP_TIMEOUT", "180"))
@@ -470,6 +471,8 @@ async def start_llama_if_needed() -> None:
         LLAMA_HOST,
         "--port",
         str(LLAMA_PORT),
+        "-t",
+        str(LLAMA_THREADS),
         "-c",
         str(LLAMA_CONTEXT_SIZE),
         "-ngl",
@@ -580,7 +583,7 @@ app.include_router(installer_router)
 
 async def load_saved_llama_server_path() -> None:
     """Restore the selected runtime and verified model configuration before startup."""
-    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_GPU_LAYERS, MODEL_ID
+    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
     try:
         if __package__:
             from . import installer as installer_service
@@ -607,6 +610,7 @@ async def load_saved_llama_server_path() -> None:
             if registered and registered.get("verified") and model_path.is_file() and str(model_path.resolve()) == str(Path(registered["path"]).resolve()):
                 LLAMA_MODEL_PATH = str(model_path.resolve())
                 LLAMA_CONTEXT_SIZE = int(config.get("context_size", LLAMA_CONTEXT_SIZE))
+                LLAMA_THREADS = int(config.get("threads", LLAMA_THREADS))
                 LLAMA_GPU_LAYERS = str(config.get("gpu_layers", LLAMA_GPU_LAYERS))
                 MODEL_ID = str(config.get("model_id", MODEL_ID))
     except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
@@ -1469,7 +1473,7 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     stopped or reconfigured. The user must stop that external server manually
     before activating a different model through Brahma Desk.
     """
-    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_GPU_LAYERS, MODEL_ID
+    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
     global llama_process, llama_process_owned, llama_start_error
 
     if __package__:
@@ -1508,6 +1512,7 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
 
         LLAMA_MODEL_PATH = str(model_path)
         LLAMA_CONTEXT_SIZE = int(config["context_size"])
+        LLAMA_THREADS = int(config["threads"])
         LLAMA_GPU_LAYERS = str(config["gpu_layers"])
         MODEL_ID = model_id
 
