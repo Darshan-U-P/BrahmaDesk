@@ -98,8 +98,8 @@ export default function InstallerWizard() {
         method: "POST",
         body: JSON.stringify({ model_id: chosen.id, context_size: contextSize, mode }),
       });
-      const result = await api<{ status: string; message: string }>("/api/installer/test/" + chosen.id, { method: "POST" });
-      setNotice(result.message);
+      const result = await api<{ status: string; generation_test: string; sample_output: string }>("/api/installer/activate/" + chosen.id, { method: "POST" });
+      setNotice("Model activated and generation smoke test passed: " + result.sample_output);
       setStep("complete");
       await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : "Validation or configuration failed."); }
@@ -165,7 +165,7 @@ export default function InstallerWizard() {
       {completedJob && <div className="installer-download-card success"><CheckCircle2 size={18}/><div><strong>Download complete</strong><p>GGUF header and checksum checks passed. Continue to validate and configure the model.</p><button className="installer-primary" onClick={() => void validateAndConfigure()} disabled={busy}>{busy ? "Validating…" : "Validate & configure"}</button></div></div>}
     </section>}
 
-    {step === "complete" && <section className="installer-complete"><CheckCircle2 size={24}/><div><h2>Model setup checks complete</h2><p>The model is registered and an inference configuration has been saved. This is not yet proof that generation works: the current check does not launch a new llama.cpp process or run a prompt.</p><button className="installer-ghost-button" onClick={() => setStep("select")}>Choose another model</button></div></section>}
+    {step === "complete" && <section className="installer-complete"><CheckCircle2 size={24}/><div><h2>Model setup checks complete</h2><p>The model is registered, the configuration was applied, and llama.cpp returned text for a smoke-test prompt. This verifies a basic generation path, not model quality or long-context performance.</p><button className="installer-ghost-button" onClick={() => setStep("select")}>Choose another model</button></div></section>}
     <div className="installer-config-controls"><label>Context length<select value={contextSize} onChange={e => setContextSize(Number(e.target.value))}><option value={2048}>2,048 tokens</option><option value={4096}>4,096 tokens</option><option value={8192}>8,192 tokens</option><option value={16384}>16,384 tokens</option></select></label><label>Inference placement<select value={mode} onChange={e => setMode(e.target.value)}><option value="auto">Auto-select</option><option value="cpu">CPU</option><option value="hybrid">CPU + GPU hybrid</option><option value="gpu">GPU</option></select></label></div>
     <footer className="installer-footer">Brahma Desk keeps model files and registry data on this device. Downloads connect to Hugging Face; model licenses and repository availability may change.</footer>
   </div>;
