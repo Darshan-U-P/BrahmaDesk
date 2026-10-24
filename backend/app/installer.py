@@ -425,6 +425,21 @@ async def get_download(job_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Download job not found in this backend session")
     return job
 
+@router.post("/downloads/{job_id}/cancel")
+async def cancel_download(job_id: str) -> dict[str, Any]:
+    _hydrate_jobs()
+    job = DOWNLOADS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    task = DOWNLOAD_TASKS.get(job_id)
+    if not task or task.done():
+        raise HTTPException(status_code=409, detail="Download is not active")
+    task.cancel()
+    job.update(status="cancelled", error="Cancelled by user")
+    _persist_job(job)
+    return job
+
+
 @router.post("/downloads/{job_id}/retry")
 async def retry_download(job_id: str) -> dict[str, Any]:
     _hydrate_jobs()
