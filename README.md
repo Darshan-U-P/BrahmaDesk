@@ -244,6 +244,6 @@ Neither the model nor `llama-server` is included in the installer. Their paths m
 
 ## Documentation
 
-- [README-E2E-AUTOMATION.md](./README-E2E-AUTOMATION.md) describes the end-to-end test kit.
-- [UPDATE-CENTER-MINI-UPDATE.md](./UPDATE-CENTER-MINI-UPDATE.md) documents the Update Center increment; its repository-owner placeholder note predates the current publisher setting in `desktop\package.json`.
-- [PATCH-NOTES.md](./PATCH-NOTES.md) records a focused E2E runner fix and its validation scope.
+- [E2E Automation](documentation/README-E2E-AUTOMATION.md)
+- [Update Center Mini-Update](documentation/UPDATE-CENTER-MINI-UPDATE.md)
+- [Patch Notes](documentation/PATCH-NOTES.md)
