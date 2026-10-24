@@ -255,7 +255,28 @@ def _running_llama_model_paths() -> list[Path]:
     script = (
         "$ErrorActionPreference='SilentlyContinue'; "
         "$p=Get-CimInstance Win32_Process | Where-Object { "
-        "$_.Name -match '^llama-server(\\.exe)?
+        "$_.Name -like 'llama-server*' -and $_.CommandLine }; "
+        "$p | Select-Object -ExpandProperty CommandLine | ConvertTo-Json -Compress"
+    )
+    raw = _powershell_json(script)
+    if isinstance(raw, str):
+        command_lines = [raw]
+    elif isinstance(raw, list):
+        command_lines = [item for item in raw if isinstance(item, str)]
+    else:
+        command_lines = []
+    found: list[Path] = []
+    pattern = r'(?:^|\s)(?:-m|--model)(?:=|\s+)(?:"([^"]+\.gguf)"|([^\s"]+\.gguf))'
+    for command_line in command_lines:
+        match = re.search(pattern, command_line, flags=re.IGNORECASE)
+        candidate = (match.group(1) or match.group(2)) if match else None
+        if candidate:
+            path = Path(candidate).expanduser()
+            if path.is_file() and path.suffix.casefold() == ".gguf":
+                found.append(path.resolve())
+    return found
+
+
 async def _hf_file_metadata(entry: dict[str, Any]) -> dict[str, Any]:
     model_url = f"https://huggingface.co/api/models/{entry['repo_id']}"
     try:
