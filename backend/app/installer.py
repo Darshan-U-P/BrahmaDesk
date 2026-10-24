@@ -392,8 +392,10 @@ async def _download_job(job_id: str, entry: dict[str, Any], destination: Path) -
         partial.replace(destination)
         _register_model(entry, destination, total, actual_sha, bool(expected_sha), metadata)
         job.update(status="completed", progress=100, bytes_downloaded=total, sha256=actual_sha, path=str(destination), error=None)
+        _persist_job(job)
     except Exception as exc:
         job.update(status="failed", error=str(exc), progress=min(job.get("progress", 0), 99))
+        _persist_job(job)
     finally:
         DOWNLOAD_TASKS.pop(job_id, None)
 
@@ -413,7 +415,7 @@ def _register_model(entry: dict[str, Any], path: Path, size: int, sha: str, veri
 @router.get("/downloads")
 async def list_downloads() -> dict[str, Any]:
     _hydrate_jobs()
-    return {"jobs": list(DOWNLOADS.values())
+    return {"jobs": list(DOWNLOADS.values())}
 
 @router.get("/downloads/{job_id}")
 async def get_download(job_id: str) -> dict[str, Any]:
