@@ -314,6 +314,16 @@ function stopBackend() {
 
 
 ipcMain.handle("app:version", () => app.getVersion());
+ipcMain.handle("dialog:select-llama-server", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select llama-server.exe",
+    buttonLabel: "Use this runtime",
+    properties: ["openFile"],
+    filters: [{ name: "llama-server.exe", extensions: ["exe"] }],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
 
 let updaterState = {
   status: "idle",
