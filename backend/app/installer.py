@@ -233,6 +233,8 @@ async def _hf_file_metadata(entry: dict[str, Any]) -> dict[str, Any]:
     lfs = match.get("lfs") or {}
     size = match.get("size") or lfs.get("size")
     sha = lfs.get("sha256")
+    if not sha and isinstance(lfs.get("oid"), str) and lfs["oid"].startswith("sha256:"):
+        sha = lfs["oid"].split(":", 1)[1]
     if not size:
         raise HTTPException(status_code=502, detail="Hugging Face did not provide the file size")
     return {
@@ -252,7 +254,7 @@ def _recommendation(model: dict[str, Any], hardware: dict[str, Any]) -> tuple[st
     estimated_ram = model["parameters_b"] * 0.75 + 2.5
     if ram and ram < model["minimum_ram_gb"]:
         return "unsupported", [f"Detected RAM ({ram} GB) is below the conservative {model['minimum_ram_gb']} GB minimum."]
-    if free_disk and free_disk < model["parameters_b"] * 0.8:
+    if hardware.get("model_directory_free_gb") is not None and free_disk < model["parameters_b"] * 0.8:
         reasons.append("Model directory has limited free disk space.")
     if ram and ram < model["recommended_ram_gb"]:
         reasons.append(f"Recommended system RAM is {model['recommended_ram_gb']} GB; detected {ram} GB.")
@@ -354,7 +356,7 @@ async def _download_job(job_id: str, entry: dict[str, Any], destination: Path) -
             if stream.read(4) != GGUF_MAGIC:
                 raise RuntimeError("File does not have GGUF magic bytes; refusing to register it.")
         partial.replace(destination)
-        _register_model(entry, destination, total, actual_sha, True, metadata)
+        _register_model(entry, destination, total, actual_sha, bool(expected_sha), metadata)
         job.update(status="completed", progress=100, bytes_downloaded=total, sha256=actual_sha, path=str(destination), error=None)
     except Exception as exc:
         job.update(status="failed", error=str(exc), progress=min(job.get("progress", 0), 99))
