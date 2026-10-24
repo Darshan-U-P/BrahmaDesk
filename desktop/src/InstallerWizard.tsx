@@ -15,7 +15,7 @@ type Model = {
   minimum_ram_gb: number; recommended_ram_gb: number; recommendation: string;
   reasons: string[]; installed: boolean; installed_path: string | null; estimated_weight_gb: number;
 };
-type Job = { id: string; model_id: string; name: string; status: string; progress: number; error?: string | null; path?: string };
+type Job = { id: string; model_id: string; name: string; status: string; progress: number; created_at?: number; error?: string | null; path?: string };
 type Runtime = { executable_path: string; exists: boolean; note: string; saved?: boolean };
 type ApiError = { detail?: string };
 
@@ -77,9 +77,10 @@ export default function InstallerWizard() {
   }, []);
 
   const chosen = models.find(model => model.id === selected);
-  const activeJob = jobs.find(job => job.model_id === selected && (job.status === "queued" || job.status === "downloading"));
-  const failedJob = jobs.find(job => job.model_id === selected && job.status === "failed");
-  const completedJob = jobs.find(job => job.model_id === selected && job.status === "completed");
+  const latestJob = jobs.filter(job => job.model_id === selected).sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+  const activeJob = latestJob && (latestJob.status === "queued" || latestJob.status === "downloading") ? latestJob : undefined;
+  const failedJob = latestJob?.status === "failed" ? latestJob : undefined;
+  const completedJob = latestJob?.status === "completed" ? latestJob : undefined;
 
   async function chooseRuntime() {
     setBusy(true); setError(""); setNotice("");
