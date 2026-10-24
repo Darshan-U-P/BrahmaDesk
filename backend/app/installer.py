@@ -329,6 +329,7 @@ async def get_registered_models() -> dict[str, Any]:
 
 @router.post("/downloads")
 async def start_download(request: DownloadRequest) -> dict[str, Any]:
+    _hydrate_jobs()
     entry = next((m for m in CATALOG if m["id"] == request.model_id), None)
     if not entry:
         raise HTTPException(status_code=404, detail="Unknown catalog model")
@@ -346,6 +347,7 @@ async def start_download(request: DownloadRequest) -> dict[str, Any]:
             "total_bytes": None, "error": None, "created_at": time.time(),
         }
         DOWNLOADS[job_id] = job
+        _persist_job(job)
         DOWNLOAD_TASKS[job_id] = asyncio.create_task(_download_job(job_id, entry, destination))
     return job
 
@@ -359,6 +361,7 @@ async def _download_job(job_id: str, entry: dict[str, Any], destination: Path) -
         if free < total + 512 * 1024 * 1024:
             raise RuntimeError(f"Not enough free disk space. Need approximately {round((total + 512 * 1024 * 1024) / (1024 ** 3), 2)} GB including temporary space.")
         job.update(status="downloading", total_bytes=total, expected_sha256=metadata["sha256"])
+        _persist_job(job)
         offset = partial.stat().st_size if partial.exists() else 0
         if offset > total:
             partial.unlink(missing_ok=True)
@@ -409,10 +412,12 @@ def _register_model(entry: dict[str, Any], path: Path, size: int, sha: str, veri
 
 @router.get("/downloads")
 async def list_downloads() -> dict[str, Any]:
-    return {"jobs": list(DOWNLOADS.values())}
+    _hydrate_jobs()
+    return {"jobs": list(DOWNLOADS.values())
 
 @router.get("/downloads/{job_id}")
 async def get_download(job_id: str) -> dict[str, Any]:
+    _hydrate_jobs()
     job = DOWNLOADS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Download job not found in this backend session")
@@ -420,6 +425,7 @@ async def get_download(job_id: str) -> dict[str, Any]:
 
 @router.post("/downloads/{job_id}/retry")
 async def retry_download(job_id: str) -> dict[str, Any]:
+    _hydrate_jobs()
     old = DOWNLOADS.get(job_id)
     if not old:
         raise HTTPException(status_code=404, detail="Download job not found")
@@ -430,6 +436,7 @@ async def retry_download(job_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Model is no longer in the catalog")
     new_id = str(uuid.uuid4())
     DOWNLOADS[new_id] = {**old, "id": new_id, "status": "queued", "progress": 0, "error": None, "created_at": time.time()}
+    _persist_job(DOWNLOADS[new_id])
     DOWNLOAD_TASKS[new_id] = asyncio.create_task(_download_job(new_id, entry, _model_path(entry["id"])))
     return DOWNLOADS[new_id]
 
