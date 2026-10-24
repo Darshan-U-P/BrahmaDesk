@@ -16,6 +16,7 @@ type Model = {
   reasons: string[]; installed: boolean; installed_path: string | null; estimated_weight_gb: number;
 };
 type Job = { id: string; model_id: string; name: string; status: string; progress: number; error?: string | null; path?: string };
+type Runtime = { executable_path: string; exists: boolean; note: string; saved?: boolean };
 type ApiError = { detail?: string };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -37,6 +38,7 @@ const recommendationLabel: Record<string, string> = {
 
 export default function InstallerWizard() {
   const [hardware, setHardware] = useState<Hardware | null>(null);
+  const [runtime, setRuntime] = useState<Runtime | null>(null);
   const [models, setModels] = useState<Model[]>([]);
   const [selected, setSelected] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -50,13 +52,15 @@ export default function InstallerWizard() {
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [catalog, downloads] = await Promise.all([
+      const [catalog, downloads, runtimeStatus] = await Promise.all([
         api<{ hardware: Hardware; models: Model[] }>("/api/installer/catalog"),
         api<{ jobs: Job[] }>("/api/installer/downloads"),
+        api<Runtime>("/api/installer/runtime"),
       ]);
       setHardware(catalog.hardware);
       setModels(catalog.models);
       setJobs(downloads.jobs);
+      setRuntime(runtimeStatus);
       setSelected(current => current || catalog.models.find(m => m.recommendation === "recommended")?.id || catalog.models[0]?.id || "");
       setStep(current => current === "scan" ? "select" : current);
     } catch (e) {
@@ -76,6 +80,21 @@ export default function InstallerWizard() {
   const activeJob = jobs.find(job => job.model_id === selected && (job.status === "queued" || job.status === "downloading"));
   const failedJob = jobs.find(job => job.model_id === selected && job.status === "failed");
   const completedJob = jobs.find(job => job.model_id === selected && job.status === "completed");
+
+  async function chooseRuntime() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const selectedPath = await window.brahmaDesktop?.selectLlamaServer?.();
+      if (!selectedPath) return;
+      const result = await api<Runtime>("/api/installer/runtime", {
+        method: "POST",
+        body: JSON.stringify({ executable_path: selectedPath }),
+      });
+      setRuntime(result);
+      setNotice("llama.cpp runtime path saved. The selected model can now be activated if this runtime supports its GGUF and hardware backend.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not select llama-server.exe."); }
+    finally { setBusy(false); }
+  }
 
   async function scanLocalModels() {
     setBusy(true); setError(""); setNotice("");
@@ -137,6 +156,13 @@ export default function InstallerWizard() {
 
     {error && <div className="installer-alert error"><AlertCircle size={17}/><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><XCircle size={15}/></button></div>}
     {notice && <div className="installer-alert info"><CheckCircle2 size={17}/><span>{notice}</span></div>}
+
+    <section className="installer-section installer-runtime-section">
+      <div className="installer-section-heading"><div><span className="installer-kicker">RUNTIME</span><h2>llama.cpp engine</h2></div><span className={"installer-tag " + (runtime?.exists ? "recommended" : "unknown")}>{runtime?.exists ? "Found" : "Needs setup"}</span></div>
+      <p className="installer-muted">{runtime?.note || "Checking local runtime…"}</p>
+      <div className="installer-runtime-row"><code>{runtime?.executable_path || "Runtime path not available"}</code><button className="installer-ghost-button" onClick={() => void chooseRuntime()} disabled={busy}><HardDrive size={15}/> Choose llama-server.exe</button></div>
+      {!runtime?.exists && <p className="installer-runtime-warning">Model downloads and validation can proceed, but activation requires a compatible llama-server.exe. Brahma Desk will not stop or replace a llama.cpp process it does not own.</p>}
+    </section>
 
     <section className="installer-section">
       <div className="installer-section-heading"><div><span className="installer-kicker">STEP 01</span><h2>Your hardware</h2></div><span className="installer-live"><i/> Local scan</span></div>
