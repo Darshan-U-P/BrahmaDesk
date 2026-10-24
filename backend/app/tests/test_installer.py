@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
@@ -70,3 +71,27 @@ def test_registry_only_returns_existing_files(tmp_path: Path, monkeypatch: pytes
 
     model_path.unlink()
     assert entry["id"] not in installer._registry_rows()
+
+
+def test_scan_validate_and_configure_local_gguf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(installer, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(installer, "MODEL_DIR", tmp_path / "models")
+    monkeypatch.setattr(installer, "REGISTRY_DB", tmp_path / "test.sqlite3")
+    installer.MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    model_path = installer.MODEL_DIR / "existing-model.gguf"
+    model_path.write_bytes(b"GGUF" + b"x" * (1024 * 1024))
+
+    scan = asyncio.run(installer.scan_local_models())
+    assert len(scan["discovered"]) == 1
+    model_id = scan["discovered"][0]["model_id"]
+    assert model_id.startswith("local-")
+
+    validation = asyncio.run(installer.validate_model(model_id))
+    assert validation["status"] == "valid"
+    assert validation["official_checksum_verified"] is False
+
+    configured = asyncio.run(installer.configure_inference(
+        installer.ConfigureRequest(model_id=model_id, context_size=4096, mode="auto")
+    ))
+    assert configured["status"] == "configured"
+    assert configured["config"]["model_path"] == str(model_path)
