@@ -464,6 +464,8 @@ async def start_llama_if_needed() -> None:
         str(executable),
         "-m",
         str(model),
+        "--alias",
+        MODEL_ID,
         "--host",
         LLAMA_HOST,
         "--port",
