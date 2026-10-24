@@ -77,6 +77,8 @@ def test_scan_validate_and_configure_local_gguf(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(installer, "DATA_DIR", tmp_path)
     monkeypatch.setattr(installer, "MODEL_DIR", tmp_path / "models")
     monkeypatch.setattr(installer, "REGISTRY_DB", tmp_path / "test.sqlite3")
+    # Isolate this test from any llama-server process running on the host.
+    monkeypatch.setattr(installer, "_running_llama_model_paths", lambda: [])
     installer.MODEL_DIR.mkdir(parents=True, exist_ok=True)
     model_path = installer.MODEL_DIR / "existing-model.gguf"
     model_path.write_bytes(b"GGUF" + b"x" * (1024 * 1024))
