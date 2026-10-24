@@ -248,19 +248,25 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 async def _hf_file_metadata(entry: dict[str, Any]) -> dict[str, Any]:
-    url = f"https://huggingface.co/api/models/{entry['repo_id']}/tree/main"
+    model_url = f"https://huggingface.co/api/models/{entry['repo_id']}"
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-            response = await client.get(url, params={"recursive": "true", "expand": "true"})
+            model_response = await client.get(model_url)
+            model_response.raise_for_status()
+            model_info = model_response.json()
+            revision = model_info.get("sha")
+            if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+                raise ValueError("Hugging Face did not return an immutable commit SHA")
+            tree_url = f"https://huggingface.co/api/models/{entry['repo_id']}/tree/{revision}"
+            response = await client.get(tree_url, params={"recursive": "true", "expand": "true"})
             response.raise_for_status()
             items = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail=f"Could not query Hugging Face: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"Could not resolve an immutable Hugging Face revision: {exc}") from exc
     target = entry["filename"].casefold()
     match = next((item for item in items if item.get("type") == "file" and item.get("path", "").casefold() == target), None)
     if not match:
-        # The catalog entry is not silently redirected to a different quantization.
-        raise HTTPException(status_code=404, detail=f"Expected GGUF file was not found in {entry['repo_id']}: {entry['filename']}")
+        raise HTTPException(status_code=404, detail=f"Expected GGUF file was not found in {entry['repo_id']} at revision {revision}: {entry['filename']}")
     lfs = match.get("lfs") or {}
     size = match.get("size") or lfs.get("size")
     sha = lfs.get("sha256")
@@ -271,8 +277,8 @@ async def _hf_file_metadata(entry: dict[str, Any]) -> dict[str, Any]:
     return {
         "size_bytes": int(size),
         "sha256": sha,
-        "revision": "main",
-        "download_url": f"https://huggingface.co/{entry['repo_id']}/resolve/main/{entry['filename']}",
+        "revision": revision,
+        "download_url": f"https://huggingface.co/{entry['repo_id']}/resolve/{revision}/{entry['filename']}",
     }
 
 def _recommendation(model: dict[str, Any], hardware: dict[str, Any]) -> tuple[str, list[str]]:
