@@ -371,7 +371,7 @@ async def install_llama_cpu_runtime() -> dict[str, Any]:
             if len(members) > 10000:
                 raise HTTPException(status_code=502, detail="Runtime archive contains too many entries")
             for member in members:
-                normalized = member.filename.replace("\\\\", "/")
+                normalized = member.filename.replace("\\", "/")
                 parts = Path(normalized).parts
                 if normalized.startswith("/") or any(part in {"..", ""} for part in parts) or (parts and ":" in parts[0]):
                     raise HTTPException(status_code=502, detail="Runtime archive contains an unsafe path")
