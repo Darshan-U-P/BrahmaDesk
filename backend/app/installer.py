@@ -518,7 +518,16 @@ async def retry_download(job_id: str) -> dict[str, Any]:
 
 @router.post("/validate/{model_id}")
 async def validate_model(model_id: str) -> dict[str, Any]:
-    path = _model_path(model_id)
+    entry = next((m for m in CATALOG if m["id"] == model_id), None)
+    registered = _registry_rows().get(model_id)
+    if entry:
+        path = _model_path(model_id)
+    elif registered and (registered.get("metadata") or {}).get("source") == "local":
+        path = Path(registered["path"]).resolve()
+        if path.parent != MODEL_DIR.resolve():
+            raise HTTPException(status_code=403, detail="Local model is outside the managed model directory")
+    else:
+        raise HTTPException(status_code=404, detail="Model is not in the catalog or local registry")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Model file is not installed")
     size = path.stat().st_size
@@ -529,22 +538,42 @@ async def validate_model(model_id: str) -> dict[str, Any]:
     if magic != GGUF_MAGIC:
         raise HTTPException(status_code=422, detail="Invalid GGUF header")
     sha = await asyncio.to_thread(_sha256, path)
-    entry = next(m for m in CATALOG if m["id"] == model_id)
-    metadata = await _hf_file_metadata(entry)
-    expected = metadata.get("sha256")
-    if expected and sha.lower() != expected.lower():
-        raise HTTPException(status_code=422, detail="SHA-256 mismatch")
-    result = _register_model(entry, path, size, sha, bool(expected), metadata)
-    return {"status": "valid", **result, "format": "GGUF", "checksum_checked": bool(expected)}
+    if entry:
+        metadata = await _hf_file_metadata(entry)
+        expected = metadata.get("sha256")
+        if expected and sha.lower() != expected.lower():
+            raise HTTPException(status_code=422, detail="SHA-256 mismatch")
+        verified = bool(expected)
+        registry_entry = entry
+    else:
+        metadata = {
+            "source": "local", "validation": "GGUF magic and local SHA-256 calculated",
+            "official_checksum_verified": False, "origin_trusted": False,
+        }
+        verified = True
+        registry_entry = {"id": model_id, "repo_id": "local-file"}
+    result = _register_model(registry_entry, path, size, sha, verified, metadata)
+    return {
+        "status": "valid", **result, "format": "GGUF",
+        "checksum_checked": bool(entry and metadata.get("sha256")),
+        "official_checksum_verified": bool(entry and metadata.get("sha256")),
+    }
 
 @router.post("/configure")
 async def configure_inference(request: ConfigureRequest) -> dict[str, Any]:
     entry = next((m for m in CATALOG if m["id"] == request.model_id), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Unknown catalog model")
     registered = _registry_rows().get(request.model_id)
     if not registered:
         raise HTTPException(status_code=409, detail="Download and validate the model before configuring it")
+    if not entry:
+        metadata = registered.get("metadata") or {}
+        if metadata.get("source") != "local":
+            raise HTTPException(status_code=404, detail="Unknown model configuration")
+        size_gb = registered["size_bytes"] / (1024 ** 3)
+        entry = {
+            "id": request.model_id, "parameters_b": max(1.0, size_gb / 0.75),
+            "minimum_vram_gb": 4, "recommended_vram_gb": 6,
+        }
     hardware = _hardware_snapshot()
     ram = hardware.get("ram_gb") or 0
     vram = max((g.get("vram_gb_reported") or 0 for g in hardware.get("gpus", [])), default=0)
@@ -558,8 +587,6 @@ async def configure_inference(request: ConfigureRequest) -> dict[str, Any]:
         context = min(context, 4096)
     if ram and ram < 8 and context > 2048:
         context = 2048
-    # GPU layers are deliberately conservative; llama.cpp may reject unsupported
-    # GPU backends, so the caller must perform a launch test before activation.
     config = {
         "model_id": request.model_id,
         "model_path": registered["path"],
@@ -568,7 +595,7 @@ async def configure_inference(request: ConfigureRequest) -> dict[str, Any]:
         "threads": max(1, min((hardware.get("cpu", {}).get("logical_cores") or os.cpu_count() or 4) - 1, 16)),
         "gpu_layers": 999 if mode == "gpu" else (20 if mode == "hybrid" else 0),
         "estimated_weight_gb": round(entry["parameters_b"] * 0.75, 2),
-        "warning": "This is a proposed configuration. A successful llama.cpp launch and generation test is still required before declaring runtime compatibility.",
+        "warning": "The selected settings will be tested by launching llama.cpp and generating a short response. GPU backend availability still depends on the installed llama.cpp build.",
     }
     _registry_init()
     with sqlite3.connect(REGISTRY_DB, timeout=10) as db:
