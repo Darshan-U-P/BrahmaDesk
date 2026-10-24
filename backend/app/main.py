@@ -1417,3 +1417,95 @@ async def set_active_profile(
         profile = get_profile_or_404(db, request.profile_id)
     write_active_profile_id(profile["id"])
     return profile
+
+
+@app.post("/api/installer/activate/{model_id}")
+async def activate_installer_model(model_id: str) -> dict[str, Any]:
+    """Apply a registered model and prove it can generate a short response.
+
+    An already-running llama.cpp process not owned by this backend is never
+    stopped or reconfigured. The user must stop that external server manually
+    before activating a different model through Brahma Desk.
+    """
+    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_GPU_LAYERS, MODEL_ID
+    global llama_process, llama_process_owned, llama_start_error
+
+    from . import installer as installer_service
+
+    registered = installer_service._registry_rows().get(model_id)
+    if not registered or not registered.get("verified"):
+        raise HTTPException(status_code=409, detail="Model must be downloaded and verified before activation")
+    model_path = Path(registered["path"])
+    if not model_path.is_file():
+        raise HTTPException(status_code=404, detail="Registered model file is missing")
+
+    saved = await installer_service.get_inference_configuration()
+    config = saved.get("config")
+    if not config or config.get("model_id") != model_id:
+        raise HTTPException(status_code=409, detail="Configure this model before activation")
+
+    async with shutdown_lock:
+        server_ready = await llama_is_ready()
+        if server_ready and not llama_process_owned:
+            raise HTTPException(
+                status_code=409,
+                detail="A llama.cpp server already running outside Brahma Desk. It was left untouched. Stop that server yourself, then retry activation.",
+            )
+
+        if llama_process_owned and llama_process is not None:
+            same_model = Path(LLAMA_MODEL_PATH).resolve() == model_path.resolve()
+            same_config = (
+                LLAMA_CONTEXT_SIZE == int(config["context_size"])
+                and str(LLAMA_GPU_LAYERS) == str(config["gpu_layers"])
+            )
+            if not (server_ready and same_model and same_config):
+                stop_owned_llama()
+
+        LLAMA_MODEL_PATH = str(model_path)
+        LLAMA_CONTEXT_SIZE = int(config["context_size"])
+        LLAMA_GPU_LAYERS = str(config["gpu_layers"])
+        MODEL_ID = model_id
+
+        if not await llama_is_ready():
+            await start_llama_if_needed()
+
+    if not await llama_is_ready():
+        raise HTTPException(
+            status_code=502,
+            detail=llama_start_error or "llama.cpp did not become ready with the selected model",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(
+                f"{LLAMA_BASE_URL}/v1/chat/completions",
+                json={
+                    "model": MODEL_ID,
+                    "messages": [{"role": "user", "content": "Reply with the word READY."}],
+                    "max_tokens": 12,
+                    "temperature": 0,
+                    "stream": False,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            choices = payload.get("choices") or []
+            answer = choices[0].get("message", {}).get("content", "") if choices else ""
+            if not isinstance(answer, str) or not answer.strip():
+                raise ValueError("The model returned no text")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Model server started but the generation smoke test failed: {exc}",
+        ) from exc
+
+    return {
+        "status": "activated",
+        "model_id": model_id,
+        "model_path": str(model_path),
+        "runtime": "llama.cpp",
+        "generation_test": "passed",
+        "sample_output": answer.strip()[:160],
+        "context_size": LLAMA_CONTEXT_SIZE,
+        "gpu_layers": LLAMA_GPU_LAYERS,
+    }
