@@ -95,3 +95,25 @@ def test_scan_validate_and_configure_local_gguf(tmp_path: Path, monkeypatch: pyt
     ))
     assert configured["status"] == "configured"
     assert configured["config"]["model_path"] == str(model_path)
+
+
+def test_scan_discovers_model_used_by_running_llama_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(installer, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(installer, "MODEL_DIR", tmp_path / "managed-models")
+    monkeypatch.setattr(installer, "REGISTRY_DB", tmp_path / "data" / "test.sqlite3")
+    installer.MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    external_dir = tmp_path / "existing-runtime-models"
+    external_dir.mkdir()
+    model_path = external_dir / "already-running.gguf"
+    model_path.write_bytes(b"GGUF" + b"x" * (1024 * 1024))
+    monkeypatch.setattr(installer, "_running_llama_model_paths", lambda: [model_path])
+
+    scan = asyncio.run(installer.scan_local_models())
+
+    assert len(scan["discovered"]) == 1
+    assert scan["discovered"][0]["path"] == str(model_path)
+    model_id = scan["discovered"][0]["model_id"]
+    validation = asyncio.run(installer.validate_model(model_id))
+    assert validation["status"] == "valid"
+    assert validation["verified"] is True
+    assert validation["official_checksum_verified"] is False
