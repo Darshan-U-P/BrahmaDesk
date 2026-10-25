@@ -104,11 +104,11 @@ try {
     $summary = [PSCustomObject]@{
         Runs = $Runs
         Backend = (($records | Select-Object -ExpandProperty Backend -Unique) -join ",")
-        MedianWallSeconds = [math]::Round((Get-Median @($records | ForEach-Object { [double]$_.WallSeconds })), 6)
-        MedianConstructionSeconds = [math]::Round((Get-Median @($records | ForEach-Object { [double]$_.ConstructionSeconds })), 6)
-        MedianPrefillTokensPerSecond = [math]::Round((Get-Median @($records | ForEach-Object { [double]$_.PrefillTokensPerSecond })), 6)
-        MedianDecodeTokensPerSecond = [math]::Round((Get-Median @($records | ForEach-Object { [double]$_.DecodeTokensPerSecond })), 6)
-        MedianProjectionSeconds = [math]::Round((Get-Median @($records | ForEach-Object { [double]$_.ProjectionSeconds })), 6)
+        MedianWallSeconds = [math]::Round((Get-Median -Values @($records | ForEach-Object { [double]$_.WallSeconds })), 6)
+        MedianConstructionSeconds = [math]::Round((Get-Median -Values @($records | ForEach-Object { [double]$_.ConstructionSeconds })), 6)
+        MedianPrefillTokensPerSecond = [math]::Round((Get-Median -Values @($records | ForEach-Object { [double]$_.PrefillTokensPerSecond })), 6)
+        MedianDecodeTokensPerSecond = [math]::Round((Get-Median -Values @($records | ForEach-Object { [double]$_.DecodeTokensPerSecond })), 6)
+        MedianProjectionSeconds = [math]::Round((Get-Median -Values @($records | ForEach-Object { [double]$_.ProjectionSeconds })), 6)
     }
     $summary | Format-List
 }
