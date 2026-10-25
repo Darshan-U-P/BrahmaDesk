@@ -16,6 +16,9 @@ option(BRAHMA_ENGINE_ENABLE_OPENMP
 option(BRAHMA_ENGINE_USE_LLAMA_CPP
     "Build Brahma Engine with the llama.cpp inference backend" ON)
 
+option(BRAHMA_ENGINE_ENABLE_CUDA
+    "Enable CUDA acceleration in the llama.cpp backend" OFF)
+
 # ---------------------------------------------------------------------------
 # Existing Brahma native inference core
 # ---------------------------------------------------------------------------
@@ -66,15 +69,6 @@ else()
     )
 endif()
 
-# Preserve the original custom engine under an explicit target name.
-add_executable(brahma-engine-native
-    src/main.cpp
-)
-
-target_link_libraries(brahma-engine-native
-    PRIVATE brahma_engine_core
-)
-
 # ---------------------------------------------------------------------------
 # Brahma Engine: llama.cpp-backed inference
 # ---------------------------------------------------------------------------
@@ -92,10 +86,9 @@ if(BRAHMA_ENGINE_USE_LLAMA_CPP)
         )
     endif()
 
-    # Configure the dependency for a lean, CPU-only initial build.
-    # These settings do not alter llama.cpp source files or its license.
-    set(GGML_CUDA OFF CACHE BOOL
-        "Disable CUDA for the initial Brahma Engine build" FORCE)
+    # Configure the llama.cpp compute backend.
+    set(GGML_CUDA ${BRAHMA_ENGINE_ENABLE_CUDA} CACHE BOOL
+        "Enable CUDA support in llama.cpp" FORCE)
 
     set(LLAMA_BUILD_COMMON OFF CACHE BOOL
         "Disable upstream common utilities" FORCE)

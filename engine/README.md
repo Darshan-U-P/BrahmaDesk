@@ -1,6 +1,6 @@
 # Brahma Engine Core
 
-Independent native C++20 runtime workstream for Brahma Desk. It does not link to llama.cpp or GGML. The Qwen2 inference implementation uses upstream llama.cpp's public Qwen2 graph as a behavioral reference; no upstream runtime code is linked.
+This project contains both an independent native C++20 runtime workstream and a llama.cpp-backed `brahma-engine` executable. The native runtime does not link to llama.cpp or GGML; its Qwen2 inference implementation uses upstream llama.cpp's public Qwen2 graph as a behavioral reference. The CLI below describes the llama.cpp-backed executable.
 
 ## Build and test (Windows / Visual Studio 2022)
 
@@ -14,13 +14,13 @@ ctest --test-dir engine/build -C Release --output-on-failure
 ## CLI
 
 ```powershell
-.\engine\build\Release\brahma-engine.exe "C:\path\to\model.gguf"
-.\engine\build\Release\brahma-engine.exe "C:\path\to\model.gguf" --list-tensors
-.\engine\build\Release\brahma-engine.exe "C:\path\to\model.gguf" --validate-qwen2
-.\engine\build\Release\brahma-engine.exe "C:\path\to\model.gguf" --generate "Explain photosynthesis simply." 16
+.\engine\build\bin\Release\brahma-engine.exe --model "C:\path\to\model.gguf" --prompt "Explain photosynthesis simply." --max-tokens 64 --ctx-size 2048 --batch-size 512 --threads 8 --gpu-layers 0 --temperature 0 --top-k 40 --top-p 0.95
+
+# Existing positional form remains supported:
+.\engine\build\bin\Release\brahma-engine.exe "C:\path\to\model.gguf" "Explain photosynthesis simply." 64
 ```
 
-The generation command is a first native CPU inference path for Qwen2.5-Instruct GGUF files. It embeds the model's tokenizer vocabulary and merge ranks, uses greedy decoding, and prints generated text. Quote prompts containing spaces in PowerShell. First load may take time and memory because the current implementation decodes supported tensors to float32 and caches them in RAM. The CLI also reports prompt-prefill and decode-loop timing to stderr; these timings exclude runtime construction and therefore help separate inference work from initial metadata/model setup. Use total wall-clock timing separately when comparing startup-to-output latency.
+The `brahma-engine` executable uses the llama.cpp backend. `--model` is required; the other options have defaults shown by `--help`. Temperature zero selects greedy decoding; positive temperatures enable Top-K/Top-P sampling. `--threads` leaves llama.cpp's backend default unchanged unless specified. GPU layer offload requires a CUDA-enabled llama.cpp build and a correctly configured CUDA toolchain; setting `--gpu-layers` alone does not enable CUDA. Quote prompts containing spaces in PowerShell.
 
 ## Current implementation
 
