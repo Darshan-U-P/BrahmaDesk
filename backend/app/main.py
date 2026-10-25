@@ -205,10 +205,15 @@ LLAMA_BASE_URL = os.getenv(
     "http://127.0.0.1:8080",
 ).rstrip("/")
 
-LLAMA_SERVER_EXE = os.getenv(
-    "LLAMA_SERVER_EXE",
-    r"D:\all project\llama-b11552-bin-win-cuda-12.4-x64\llama-server.exe",
-)
+def _default_llama_server_exe() -> str:
+    """Prefer an explicit or packaged runtime; retain a local dev fallback."""
+    configured = os.getenv("LLAMA_SERVER_EXE") or os.getenv("BRAHMA_PACKAGED_LLAMA_SERVER_EXE")
+    if configured:
+        return configured
+    return "D:/all project/llama-b11552-bin-win-cuda-12.4-x64/llama-server.exe"
+
+
+LLAMA_SERVER_EXE = _default_llama_server_exe()
 
 LLAMA_MODEL_PATH = os.getenv(
     "LLAMA_MODEL_PATH",
