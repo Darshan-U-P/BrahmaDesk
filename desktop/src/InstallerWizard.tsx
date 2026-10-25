@@ -49,6 +49,7 @@ export default function InstallerWizard() {
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<"scan" | "select" | "download" | "configure" | "complete">("scan");
   const autoDownloadStarted = useRef(false);
+  const autoConfigureStarted = useRef(false);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -166,6 +167,11 @@ export default function InstallerWizard() {
       .then(() => refresh())
       .catch(e => setError(e instanceof Error ? e.message : "Automatic model download could not start."));
   }, [models, runtime, refresh]);
+  useEffect(() => {
+    if (!autoDownloadStarted.current || !completedJob || autoConfigureStarted.current || busy) return;
+    autoConfigureStarted.current = true;
+    void validateAndConfigure();
+  }, [completedJob, busy, selected, contextSize, mode]);
   return <div className="installer-page">
     <div className="installer-hero">
       <div className="installer-icon"><Sparkles size={23}/></div>
