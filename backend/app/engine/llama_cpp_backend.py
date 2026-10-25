@@ -154,7 +154,9 @@ class LlamaCppServerBackend:
         port = self._available_port(self._host)
         gpu_layers = settings.gpu_layers
         if gpu_layers is None:
-            gpu_layers = 0 if settings.mode == "cpu" else (20 if settings.mode == "hybrid" else 999)
+            # Keep "auto" conservative and predictable; the existing installer
+            # settings can explicitly request more GPU layers after validation.
+            gpu_layers = 0 if settings.mode == "cpu" else (20 if settings.mode == "hybrid" else 20 if settings.mode == "auto" else 999)
         threads = settings.threads or max(1, min((__import__("os").cpu_count() or 4) - 1, 16))
         command = [
             str(self._executable), "-m", str(model.path),
