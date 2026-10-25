@@ -46,6 +46,14 @@ int main() {
         req(near(rope_values[2], std::cos(1.0f)) &&
             near(rope_values[3], std::sin(1.0f)), "RoPE position one");
 
+        // NeoX RoPE pairs the first and second halves of the head dimension.
+        std::array<float, 4> neox_values{1, 0, 0, 1};
+        brahma::rope_f32(neox_values, 1, 4, 1, 10000.0f, brahma::RopeLayout::NeoX);
+        req(near(neox_values[0], std::cos(1.0f)) &&
+            near(neox_values[2], std::sin(1.0f)), "NeoX RoPE first half-pair");
+        req(near(neox_values[1], -std::sin(0.01f)) &&
+            near(neox_values[3], std::cos(0.01f)), "NeoX RoPE second half-pair");
+
         // Zero Q/K gives uniform attention over only the causal prefix.
         const std::array<float, 3> q{0, 0, 0};
         const std::array<float, 3> k{0, 0, 0};
