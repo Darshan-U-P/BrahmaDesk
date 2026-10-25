@@ -15,9 +15,9 @@ The project is designed for a single machine. It does not currently provide clou
 - Retrieves relevant active memories, available project context, and earlier conversation messages within a bounded context budget.
 - Exposes model sampling controls and reasoning preferences in the desktop interface.
 - Includes a user-controlled Update Center for checking, downloading, and installing packaged releases.
-- Packages the desktop application and FastAPI backend into a Windows x64 NSIS installer.
+- Packages the desktop application and FastAPI backend into a Windows x64 MSI installer.
 
-The standard `llama-server.exe` and GGUF model are not bundled. They must be supplied and configured on each machine. The source-development fallback for `LLAMA_SERVER_EXE` points to `D:\all project\llama-b11552-bin-win-cuda-12.4-x64\llama-server.exe`; on another machine, set `LLAMA_SERVER_EXE` or use the installer runtime picker. Brahma Desk launches the standard llama.cpp server and uses its OpenAI-compatible API; `BRAHMA_ENGINE_V1_ENABLED=0` temporarily switches to the previous server process manager for rollback/testing.
+The standard llama.cpp runtime is staged into packaged MSI resources from a local Windows distribution at build time. The GGUF model is downloaded during first-run setup and is not embedded in the MSI. The source-development fallback for `LLAMA_SERVER_EXE` points to `D:\all project\llama-b11552-bin-win-cuda-12.4-x64\llama-server.exe`; on another machine, set `LLAMA_SERVER_EXE` or use the installer runtime picker. Brahma Desk launches the standard llama.cpp server and uses its OpenAI-compatible API; `BRAHMA_ENGINE_V1_ENABLED=0` temporarily switches to the previous server process manager for rollback/testing.
 
 ## Project Layout
 
@@ -238,7 +238,7 @@ npm run dist:win
 
 The installer and update metadata are generated under `desktop\release\`. The NSIS installer targets Windows x64 and is configured to preserve user data when the application is uninstalled.
 
-The installer does not bundle the GGUF model or `llama-server`; their paths must be configured on the target PC.
+The MSI bundles the staged llama.cpp runtime but not the multi-gigabyte GGUF model. The first launch immediately after installation offers Standard installation, Clean installation, or Cancel setup before the backend starts. Standard installation preserves user data. Clean installation asks for confirmation, deletes only `%APPDATA%\\brahma-desk` (including conversations, profiles, settings, memories, registry/configuration, and managed downloaded models), and makes the first model scan ignore unrelated local GGUF files so the recommended model is downloaded fresh. GGUF files outside Brahma Desk's managed data directory are not deleted.
 
 ### Releases and Updates
 
@@ -340,3 +340,10 @@ The runtime directory must contain `llama-server.exe` and all DLLs shipped with 
 On first launch, Brahma Desk scans its managed model folder and common user model folders. If no supported local GGUF is discovered and the bundled runtime is available, it automatically downloads the recommended model from Hugging Face, checks available disk space and integrity metadata, then validates and activates it. This first-run download requires an internet connection; the MSI itself does not contain the multi-gigabyte model.
 
 MSI artifacts are written to `desktop/release/BrahmaDesk-Setup-0.2.3.msi`.
+
+
+### Clean installation behavior (0.2.4 preview)
+
+The MSI's `runAfterFinish` launches Brahma Desk, and the application presents the installation-mode choice before starting the backend. This keeps the normal MSI upgrade path data-preserving while providing an explicitly confirmed clean reset. The choice is shown once per application version. Choosing Clean installation removes the managed Brahma Desk data directory and its downloaded models, then triggers fresh recommended-model setup rather than reusing GGUFs found in common external folders. The clean reset does not remove model files stored outside Brahma Desk's managed directory.
+
+Validate both modes on a Windows test account before publishing: standard upgrade must retain the database and models; clean installation must clear chats/profiles/settings/memories and managed models, then download and activate the recommended model.
