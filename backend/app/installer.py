@@ -472,12 +472,48 @@ async def scan_local_models() -> dict[str, Any]:
     discovered = []
     rejected = []
     candidates: dict[str, Path] = {}
-    # Search managed model storage recursively, and include the exact GGUF path
-    # passed to a currently running llama-server. Do not scan entire drives.
-    for path in MODEL_DIR.rglob("*.gguf"):
-        candidates[str(path.resolve()).casefold()] = path
-    for path in _running_llama_model_paths():
-        candidates[str(path.resolve()).casefold()] = path
+    # A clean install consumes this one-shot marker and deliberately ignores
+    # unrelated local GGUF files on the first scan, ensuring the recommended
+    # model is downloaded fresh instead of reusing a previous model.
+    clean_marker = DATA_DIR / "clean-install-pending.json"
+    clean_first_scan = clean_marker.is_file()
+    if clean_first_scan:
+        try:
+            clean_marker.unlink()
+        except OSError:
+            pass
+
+    # Never recursively scan whole drives; skip inaccessible paths and duplicate roots.
+    roots = [MODEL_DIR]
+    if not clean_first_scan:
+        roots.extend([
+            Path.home() / "Models",
+            Path.home() / "models",
+            Path.home() / "Downloads",
+            Path.home() / "Documents" / "Models",
+            Path(os.getenv("USERPROFILE", str(Path.home()))) / "models",
+            Path(os.getenv("USERPROFILE", str(Path.home()))) / "Downloads",
+        ])
+    seen_roots: set[str] = set()
+    for root in roots:
+        try:
+            key = str(root.resolve()).casefold()
+            if key in seen_roots or not root.is_dir():
+                continue
+            seen_roots.add(key)
+            # Bound search depth to prevent expensive scans of unrelated folders.
+            for path in root.glob("*.gguf"):
+                candidates[str(path.resolve()).casefold()] = path
+            if root != MODEL_DIR:
+                for child in root.iterdir():
+                    if child.is_dir() and not child.is_symlink():
+                        for path in child.glob("*.gguf"):
+                            candidates[str(path.resolve()).casefold()] = path
+        except OSError:
+            continue
+    if not clean_first_scan:
+        for path in _running_llama_model_paths():
+            candidates[str(path.resolve()).casefold()] = path
     for path in candidates.values():
         if str(path.resolve()).casefold() in catalog_paths:
             continue

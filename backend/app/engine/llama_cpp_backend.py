@@ -1,8 +1,8 @@
-"""Owned-process llama.cpp adapter for the Brahma Engine contract.
+"""Owned-process llama.cpp server adapter for Brahma Desk.
 
-This adapter is intentionally opt-in: it owns only the Popen process it creates
-and binds it to a newly allocated loopback port. It never attaches to or kills
-an unrelated llama-server process.
+Only the llama-server process spawned by this adapter is ever stopped. The
+server binary and adjacent runtime DLLs are used in-place from the selected
+llama.cpp distribution directory.
 """
 from __future__ import annotations
 
@@ -136,6 +136,31 @@ class LlamaCppServerBackend:
             probe.bind((host, 0))
             return int(probe.getsockname()[1])
 
+    def _build_command(
+        self, model: ModelArtifact, settings: EngineSettings, *, port: int | None = None
+    ) -> list[str]:
+        """Build the standard llama-server command for the selected local model."""
+        if port is None:
+            port = self._available_port(self._host)
+        if settings.mode == "cpu":
+            gpu_layers = 0
+        elif settings.gpu_layers is not None:
+            gpu_layers = max(0, settings.gpu_layers)
+        elif settings.mode == "hybrid":
+            gpu_layers = 20
+        elif settings.mode == "gpu":
+            gpu_layers = 999
+        else:
+            gpu_layers = 20
+
+        threads = settings.threads or max(1, min((__import__("os").cpu_count() or 4) - 1, 16))
+        return [
+            str(self._executable), "-m", str(model.path),
+            "--alias", model.model_id, "--host", self._host, "--port", str(port),
+            "-t", str(threads), "-c", str(settings.context_size),
+            "-ngl", str(gpu_layers), "--no-webui",
+        ]
+
     async def start(
         self, model: ModelArtifact, settings: EngineSettings
     ) -> EngineHealth:
@@ -152,16 +177,10 @@ class LlamaCppServerBackend:
             )
 
         port = self._available_port(self._host)
-        gpu_layers = settings.gpu_layers
-        if gpu_layers is None:
-            gpu_layers = 0 if settings.mode == "cpu" else (20 if settings.mode == "hybrid" else 999)
-        threads = settings.threads or max(1, min((__import__("os").cpu_count() or 4) - 1, 16))
-        command = [
-            str(self._executable), "-m", str(model.path),
-            "--alias", model.model_id, "--host", self._host, "--port", str(port),
-            "-t", str(threads), "-c", str(settings.context_size),
-            "-ngl", str(gpu_layers), "--no-webui",
-        ]
+        command = self._build_command(model, settings, port=port)
+        # Run from the binary directory so Windows resolves CUDA/GGML DLLs
+        # distributed alongside llama-server.exe.
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             self._process = subprocess.Popen(
                 command,
@@ -169,6 +188,7 @@ class LlamaCppServerBackend:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
             )
         except OSError as exc:
             self._process = None

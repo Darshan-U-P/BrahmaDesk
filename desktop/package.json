@@ -1,6 +1,6 @@
 {
   "name": "brahma-desk",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -8,7 +8,9 @@
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "dist:win": "npm run build && electron-builder --win nsis",
+    "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-llama-runtime.ps1",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../backend/build_backend.ps1",
+    "dist:win": "npm run build && npm run stage:runtime && npm run build:backend && electron-builder --win msi",
     "dist:dir": "npm run build && electron-builder --dir"
   },
   "dependencies": {
@@ -53,14 +55,14 @@
         "to": "backend/brahma-backend.exe"
       },
       {
-        "from": "build/model-placeholder.txt",
-        "to": "model-placeholder.txt"
+        "from": "build/llama-runtime",
+        "to": "llama-runtime"
       }
     ],
     "win": {
       "target": [
         {
-          "target": "nsis",
+          "target": "msi",
           "arch": [
             "x64"
           ]
@@ -69,15 +71,13 @@
       "artifactName": "BrahmaDesk-Setup-${version}.${ext}",
       "icon": "build/icon.ico"
     },
-    "nsis": {
+    "msi": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "upgradeCode": "{C7F62B3A-5E1D-4D27-9F13-7E0A4B2C9D61}",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Brahma Desk",
-      "deleteAppDataOnUninstall": false,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
       "runAfterFinish": true
     },
     "publish": [

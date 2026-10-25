@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Cpu, Download, HardDrive, RefreshCw, ShieldCheck, Sparkles, XCircle } from "lucide-react";
 import "./installer.css";
 
@@ -16,7 +16,6 @@ type Model = {
   reasons: string[]; installed: boolean; installed_path: string | null; estimated_weight_gb: number;
 };
 type Job = { id: string; model_id: string; name: string; status: string; progress: number; created_at?: number; error?: string | null; path?: string };
-type Runtime = { executable_path: string; exists: boolean; note: string; saved?: boolean; version?: string; already_installed?: boolean };
 type ApiError = { detail?: string };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -38,7 +37,6 @@ const recommendationLabel: Record<string, string> = {
 
 export default function InstallerWizard() {
   const [hardware, setHardware] = useState<Hardware | null>(null);
-  const [runtime, setRuntime] = useState<Runtime | null>(null);
   const [models, setModels] = useState<Model[]>([]);
   const [selected, setSelected] = useState("");
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -47,22 +45,22 @@ export default function InstallerWizard() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [runtimeInstallAttempted, setRuntimeInstallAttempted] = useState(false);
   const [step, setStep] = useState<"scan" | "select" | "download" | "configure" | "complete">("scan");
+  const autoDownloadStarted = useRef(false);
+  const autoConfigureStarted = useRef(false);
 
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [catalog, downloads, runtimeStatus] = await Promise.all([
+      await api("/api/installer/scan-local", { method: "POST" }).catch(() => undefined);
+      const [catalog, downloads] = await Promise.all([
         api<{ hardware: Hardware; models: Model[] }>("/api/installer/catalog"),
         api<{ jobs: Job[] }>("/api/installer/downloads"),
-        api<Runtime>("/api/installer/runtime"),
       ]);
       setHardware(catalog.hardware);
       setModels(catalog.models);
       setJobs(downloads.jobs);
-      setRuntime(runtimeStatus);
-      setSelected(current => current || catalog.models.find(m => m.recommendation === "recommended")?.id || catalog.models[0]?.id || "");
+      setSelected(current => current || catalog.models.find(m => m.installed)?.id || catalog.models.find(m => m.recommendation === "recommended")?.id || catalog.models[0]?.id || "");
       setStep(current => current === "scan" ? "select" : current);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load installer data.");
@@ -70,12 +68,6 @@ export default function InstallerWizard() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => {
-    if (runtime && !runtime.exists && !runtimeInstallAttempted) {
-      setRuntimeInstallAttempted(true);
-      void installRuntime();
-    }
-  }, [runtime, runtimeInstallAttempted]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       void api<{ jobs: Job[] }>("/api/installer/downloads").then(result => setJobs(result.jobs)).catch(() => undefined);
@@ -88,32 +80,6 @@ export default function InstallerWizard() {
   const activeJob = latestJob && (latestJob.status === "queued" || latestJob.status === "downloading") ? latestJob : undefined;
   const failedJob = latestJob?.status === "failed" ? latestJob : undefined;
   const completedJob = latestJob?.status === "completed" ? latestJob : undefined;
-
-  async function installRuntime() {
-    if (busy) return;
-    setBusy(true); setError(""); setNotice("Installing the official llama.cpp Windows x64 CPU runtime. This may take a few minutes.");
-    try {
-      const result = await api<Runtime & { version?: string; archive_checksum_verified?: boolean }>("/api/installer/runtime/install", { method: "POST" });
-      setRuntime(result);
-      setNotice("llama.cpp runtime " + (result.version || "") + " installed and validated. " + (result.archive_checksum_verified ? "Release archive SHA-256 verified." : "The release did not publish an archive SHA-256; the executable passed its --version smoke test."));
-    } catch (e) { setError(e instanceof Error ? e.message : "Automatic runtime installation failed. You can select an existing llama-server.exe instead."); }
-    finally { setBusy(false); }
-  }
-
-  async function chooseRuntime() {
-    setBusy(true); setError(""); setNotice("");
-    try {
-      const selectedPath = await window.brahmaDesktop?.selectLlamaServer?.();
-      if (!selectedPath) return;
-      const result = await api<Runtime>("/api/installer/runtime", {
-        method: "POST",
-        body: JSON.stringify({ executable_path: selectedPath }),
-      });
-      setRuntime(result);
-      setNotice("llama.cpp runtime path saved. The selected model can now be activated if this runtime supports its GGUF and hardware backend.");
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not select llama-server.exe."); }
-    finally { setBusy(false); }
-  }
 
   async function scanLocalModels() {
     setBusy(true); setError(""); setNotice("");
@@ -154,6 +120,25 @@ export default function InstallerWizard() {
     finally { setBusy(false); }
   }
 
+  // The MSI bundles the selected llama.cpp runtime. Automatically download
+  // the recommended model on first run when no managed or discovered model exists.
+  useEffect(() => {
+    if (models.length === 0 || models.some(model => model.installed) || autoDownloadStarted.current) return;
+    const candidate = models.find(model => model.recommendation === "recommended") || models.find(model => model.recommendation === "compatible_with_constraints") || models.find(model => model.recommendation !== "unsupported");
+    if (!candidate) return;
+    autoDownloadStarted.current = true;
+    setSelected(candidate.id);
+    setStep("download");
+    setNotice("First-run setup: downloading " + candidate.name + " automatically. Progress is shown below.");
+    void api<Job>("/api/installer/downloads", { method: "POST", body: JSON.stringify({ model_id: candidate.id }) })
+      .then(() => refresh())
+      .catch(e => setError(e instanceof Error ? e.message : "Automatic model download could not start."));
+  }, [models, refresh]);
+  useEffect(() => {
+    if (!autoDownloadStarted.current || !completedJob || autoConfigureStarted.current || busy) return;
+    autoConfigureStarted.current = true;
+    void validateAndConfigure();
+  }, [completedJob, busy, selected, contextSize, mode]);
   return <div className="installer-page">
     <div className="installer-hero">
       <div className="installer-icon"><Sparkles size={23}/></div>
@@ -176,13 +161,6 @@ export default function InstallerWizard() {
     {error && <div className="installer-alert error"><AlertCircle size={17}/><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><XCircle size={15}/></button></div>}
     {notice && <div className="installer-alert info"><CheckCircle2 size={17}/><span>{notice}</span></div>}
 
-    <section className="installer-section installer-runtime-section">
-      <div className="installer-section-heading"><div><span className="installer-kicker">RUNTIME</span><h2>llama.cpp engine</h2></div><span className={"installer-tag " + (runtime?.exists ? "recommended" : "unknown")}>{runtime?.exists ? "Found" : "Needs setup"}</span></div>
-      <p className="installer-muted">{runtime?.note || "Checking local runtime…"}</p>
-      <div className="installer-runtime-row"><code>{runtime?.executable_path || "Runtime path not available"}</code><button className="installer-primary" onClick={() => void installRuntime()} disabled={busy}><Download size={15}/>{busy ? "Installing runtime…" : "Install / repair runtime"}</button><button className="installer-ghost-button" onClick={() => void chooseRuntime()} disabled={busy}><HardDrive size={15}/> Choose existing runtime</button></div>
-      {!runtime?.exists && <p className="installer-runtime-warning">Brahma Desk will attempt to install the official Windows x64 CPU runtime automatically. You can also select an existing runtime. It will not stop or replace a llama.cpp process it does not own.</p>}
-    </section>
-
     <section className="installer-section">
       <div className="installer-section-heading"><div><span className="installer-kicker">STEP 01</span><h2>Your hardware</h2></div><span className="installer-live"><i/> Local scan</span></div>
       {!hardware ? <div className="installer-loading"><RefreshCw size={17} className="installer-spin"/> Scanning CPU, memory, GPU and disk…</div> : <>
@@ -193,7 +171,7 @@ export default function InstallerWizard() {
         </div>
         <div className="installer-gpu-list"><strong>Graphics adapters</strong>{hardware.gpus.length ? hardware.gpus.map((gpu, index) => <div key={gpu.name + "-" + index}><span>{gpu.name}</span><small>{gpu.vram_gb_reported == null ? "VRAM unknown" : gpu.vram_gb_reported + " GB reported VRAM"}</small></div>) : <p>No GPU information was returned by the operating system.</p>}</div>
         <p className="installer-muted">{hardware.os} {hardware.os_release} · Models saved to <code>{hardware.model_directory}</code></p>
-        <p className="installer-disclaimer"><ShieldCheck size={14}/> GPU memory and compatibility are best-effort estimates. The final runtime must be tested with the actual llama.cpp backend.</p>
+        <p className="installer-disclaimer"><ShieldCheck size={14}/> GPU memory and compatibility are estimates. Confirm that the selected model generates a response before relying on performance.</p>
       </>}
     </section>
 

@@ -205,10 +205,17 @@ LLAMA_BASE_URL = os.getenv(
     "http://127.0.0.1:8080",
 ).rstrip("/")
 
-LLAMA_SERVER_EXE = os.getenv(
-    "LLAMA_SERVER_EXE",
-    r"D:\all project\llama-b11552-bin-win-cuda-12.4-x64\llama-server.exe",
-)
+def _default_llama_server_exe() -> str:
+    """Prefer an explicit or packaged runtime; retain a local dev fallback."""
+    # A packaged build must always prefer its bundled runtime over stale
+    # developer-machine environment variables or paths saved in older installs.
+    configured = os.getenv("BRAHMA_PACKAGED_LLAMA_SERVER_EXE") or os.getenv("LLAMA_SERVER_EXE")
+    if configured:
+        return configured
+    return "D:/all project/llama-b11552-bin-win-cuda-12.4-x64/llama-server.exe"
+
+
+LLAMA_SERVER_EXE = _default_llama_server_exe()
 
 LLAMA_MODEL_PATH = os.getenv(
     "LLAMA_MODEL_PATH",
@@ -252,8 +259,8 @@ LLAMA_LOAD_MODE = os.getenv("LLAMA_LOAD_MODE", "auto")
 LLAMA_STARTUP_TIMEOUT = float(os.getenv("LLAMA_STARTUP_TIMEOUT", "180"))
 MODEL_ID = os.getenv("LLAMA_MODEL_ID", "local-model")
 
-# Opt-in only until Engine v1 has been verified in the local desktop workflow.
-ENGINE_V1_ENABLED = os.getenv("BRAHMA_ENGINE_V1_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+# Use the persistent, owned llama.cpp server adapter by default. Set BRAHMA_ENGINE_V1_ENABLED=0 to roll back to the legacy server path during testing.
+ENGINE_V1_ENABLED = os.getenv("BRAHMA_ENGINE_V1_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
 engine_v1_supervisor = None
 
 # Electron generates a random token and passes it to this backend.
@@ -581,51 +588,84 @@ def _engine_v1_mode() -> str:
     return mode if mode in {"auto", "cpu", "hybrid", "gpu"} else "auto"
 
 
-async def start_engine_v1() -> None:
-    """Start Engine v1's owned llama.cpp runtime using the selected local model."""
-    global engine_v1_supervisor
+async def start_engine_v1(*, force_owned: bool = False) -> None:
+    """Start a server-owned supervisor, unless an external server should be reused."""
+    global engine_v1_supervisor, LLAMA_BASE_URL
     if EngineSupervisor is None or LlamaCppServerBackend is None or EngineSettings is None:
-        raise RuntimeError("Engine v1 modules are unavailable in this installation")
+        raise RuntimeError("llama.cpp server adapter modules are unavailable in this installation")
+
+    if not force_owned and await llama_is_ready():
+        # Do not attach EngineSupervisor to a server process it did not launch.
+        print(
+            f"[Brahma Desk] Reusing existing llama.cpp HTTP endpoint at {LLAMA_BASE_URL}.",
+            flush=True,
+        )
+        engine_v1_supervisor = None
+        return
+
+    executable = Path(LLAMA_SERVER_EXE).expanduser()
+    model_path = Path(LLAMA_MODEL_PATH).expanduser()
     try:
-        gpu_layers: int | None = max(0, int(LLAMA_GPU_LAYERS))
+        # Explicit setup configuration is saved with its resolved mode. Keep
+        # CPU mode truly CPU-only even if a stale environment value requests
+        # layer offload; GPU/hybrid use the configured layer budget.
+        gpu_layers: int | None = (
+            0 if _engine_v1_mode() == "cpu"
+            else max(0, int(LLAMA_GPU_LAYERS))
+        )
     except (TypeError, ValueError):
         gpu_layers = None
+
     supervisor = EngineSupervisor(
-        LlamaCppServerBackend(Path(LLAMA_SERVER_EXE).expanduser(), startup_timeout=LLAMA_STARTUP_TIMEOUT)
+        LlamaCppServerBackend(executable, startup_timeout=LLAMA_STARTUP_TIMEOUT)
     )
     await supervisor.start(
-        Path(LLAMA_MODEL_PATH).expanduser(),
-        EngineSettings(context_size=LLAMA_CONTEXT_SIZE, mode=_engine_v1_mode(),
-                       threads=max(1, LLAMA_THREADS), gpu_layers=gpu_layers),
+        model_path,
+        EngineSettings(
+            context_size=LLAMA_CONTEXT_SIZE,
+            mode=_engine_v1_mode(),
+            threads=max(1, LLAMA_THREADS),
+            gpu_layers=gpu_layers,
+        ),
     )
     engine_v1_supervisor = supervisor
-    print("[Brahma Desk] Engine v1 is ready (owned llama.cpp runtime).", flush=True)
+    health = await supervisor.health()
+    endpoint = health.diagnostics.get("base_url")
+    if endpoint:
+        LLAMA_BASE_URL = str(endpoint)
+    print("[Brahma Desk] Standard llama.cpp server is ready.", flush=True)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global engine_v1_supervisor
     await load_saved_llama_server_path()
     if ENGINE_V1_ENABLED:
-        await start_engine_v1()
+        try:
+            await start_engine_v1()
+        except Exception as exc:
+            # Keep FastAPI alive so the user can select a valid runtime/model from
+            # the UI; do not silently launch a second legacy server.
+            print(f"[Brahma Desk] llama.cpp startup failed: {exc}", flush=True)
+            engine_v1_supervisor = None
     else:
         await start_llama_if_needed()
     try:
         yield
     finally:
-        global engine_v1_supervisor
         if ENGINE_V1_ENABLED and engine_v1_supervisor is not None:
             try:
                 await engine_v1_supervisor.stop()
             except Exception as exc:
-                print(f"[Brahma Desk] Engine v1 shutdown error: {exc}", flush=True)
+                print(f"[Brahma Desk] llama.cpp shutdown error: {exc}", flush=True)
             finally:
                 engine_v1_supervisor = None
-        else:
+        elif not ENGINE_V1_ENABLED:
             async with shutdown_lock:
                 try:
                     stop_owned_llama()
                 except (OSError, subprocess.SubprocessError) as exc:
-                    print(f"[Brahma Desk] Model shutdown error: {exc}", flush=True)
+                    print(f"[Brahma Desk] Legacy model shutdown error: {exc}", flush=True)
 
 
 app = FastAPI(
@@ -656,7 +696,7 @@ app.include_router(installer_router)
 
 async def load_saved_llama_server_path() -> None:
     """Restore the selected runtime and verified model configuration before startup."""
-    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
+    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, LLAMA_LOAD_MODE, MODEL_ID
     try:
         if __package__:
             from . import installer as installer_service
@@ -685,6 +725,9 @@ async def load_saved_llama_server_path() -> None:
                 LLAMA_CONTEXT_SIZE = int(config.get("context_size", LLAMA_CONTEXT_SIZE))
                 LLAMA_THREADS = int(config.get("threads", LLAMA_THREADS))
                 LLAMA_GPU_LAYERS = str(config.get("gpu_layers", LLAMA_GPU_LAYERS))
+                saved_mode = str(config.get("mode", LLAMA_LOAD_MODE)).strip().lower()
+                if saved_mode in {"auto", "cpu", "hybrid", "gpu"}:
+                    LLAMA_LOAD_MODE = saved_mode
                 MODEL_ID = str(config.get("model_id", MODEL_ID))
     except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
         # Keep the environment/default path if no valid saved runtime is available.
@@ -707,8 +750,23 @@ async def health() -> dict[str, Any]:
             llama_process is not None and llama_process.poll() is None
         ),
         "startup_error": llama_start_error,
+        "engine_backend": "llama.cpp",
     }
 
+    if ENGINE_V1_ENABLED and engine_v1_supervisor is not None:
+        try:
+            engine_health = await engine_v1_supervisor.health()
+            status["engine_backend"] = engine_health.backend
+            status["engine_state"] = engine_health.state.value
+            status["llama_server"] = "ok" if engine_health.generation_ready else "unreachable"
+            status["model"] = engine_health.model_id
+            status["managed_by_backend"] = engine_health.process_owned
+            status["llama_process_running"] = engine_health.process_owned
+            if engine_health.message:
+                status["startup_error"] = engine_health.message
+            return status
+        except Exception as exc:
+            status["startup_error"] = str(exc)
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(f"{LLAMA_BASE_URL}/v1/models")
@@ -723,6 +781,11 @@ async def health() -> dict[str, Any]:
 
     except (httpx.HTTPError, ValueError):
         pass
+
+    if ENGINE_V1_ENABLED and status["llama_server"] != "ok" and not status["startup_error"]:
+        status["startup_error"] = (
+            "No llama.cpp server is ready. Check the selected runtime and model in setup."
+        )
 
     return status
 
@@ -1069,10 +1132,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         generation_complete = False
 
         try:
-            if ENGINE_V1_ENABLED:
-                if engine_v1_supervisor is None or GenerationRequest is None:
-                    yield f"data: {json.dumps({'error': 'Engine v1 is enabled but not ready'})}\n\n"
-                    return
+            if ENGINE_V1_ENABLED and engine_v1_supervisor is not None and GenerationRequest is not None:
                 # Map the legacy unlimited sentinel to a safe bounded cap for Engine v1.
                 engine_max_tokens = max(1, min(1024, LLAMA_CONTEXT_SIZE - 256)) if request.max_tokens == -1 else request.max_tokens
                 messages = payload["messages"]
@@ -1550,8 +1610,8 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     occupied by one, move Brahma Desk's managed server to an available loopback
     port and persist that endpoint for subsequent launches.
     """
-    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
-    global llama_process, llama_process_owned, llama_start_error
+    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, LLAMA_LOAD_MODE, MODEL_ID
+    global llama_process, llama_process_owned, llama_start_error, engine_v1_supervisor
 
     if __package__:
         from . import installer as installer_service
@@ -1570,67 +1630,101 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     if not config or config.get("model_id") != model_id:
         raise HTTPException(status_code=409, detail="Configure this model before activation")
 
-    async with shutdown_lock:
-        server_ready = await llama_is_ready()
-        if server_ready and not llama_process_owned:
-            # The configured port belongs to an external process. Leave it
-            # untouched and start Brahma Desk's own server on another port.
-            # Persist the new endpoint so chat does not reconnect to the
-            # external server after the application is restarted.
+    if ENGINE_V1_ENABLED:
+        # Engine v1 owns its process through the supervisor, separate from the
+        # legacy process variables below. Never stop a process we did not create.
+        if engine_v1_supervisor is not None:
             try:
-                LLAMA_PORT = _find_available_llama_port()
-                LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
-                _persist_llama_endpoint(LLAMA_PORT)
-                server_ready = await llama_is_ready()
-            except OSError as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Could not allocate a separate local llama.cpp port: {exc}",
-                ) from exc
+                await engine_v1_supervisor.stop()
+            finally:
+                engine_v1_supervisor = None
 
-        if llama_process_owned and llama_process is not None:
-            same_model = Path(LLAMA_MODEL_PATH).resolve() == model_path.resolve()
-            same_config = (
-                LLAMA_CONTEXT_SIZE == int(config["context_size"])
-                and str(LLAMA_GPU_LAYERS) == str(config["gpu_layers"])
-            )
-            if not (server_ready and same_model and same_config):
-                stop_owned_llama()
-
-        LLAMA_MODEL_PATH = str(model_path)
+        LLAMA_MODEL_PATH = str(model_path.resolve())
         LLAMA_CONTEXT_SIZE = int(config["context_size"])
         LLAMA_THREADS = int(config["threads"])
         LLAMA_GPU_LAYERS = str(config["gpu_layers"])
+        configured_mode = str(config.get("mode", "auto")).strip().lower()
+        LLAMA_LOAD_MODE = configured_mode if configured_mode in {"auto", "cpu", "hybrid", "gpu"} else "auto"
         MODEL_ID = model_id
+        try:
+            await start_engine_v1(force_owned=True)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not start the selected model with llama.cpp: {exc}",
+            ) from exc
+    else:
+        async with shutdown_lock:
+            server_ready = await llama_is_ready()
+            if server_ready and not llama_process_owned:
+                # The configured port belongs to an external process. Leave it
+                # untouched and start Brahma Desk's own server on another port.
+                try:
+                    LLAMA_PORT = _find_available_llama_port()
+                    LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
+                    _persist_llama_endpoint(LLAMA_PORT)
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Could not allocate a separate local llama.cpp port: {exc}",
+                    ) from exc
+
+            if llama_process_owned and llama_process is not None:
+                same_model = Path(LLAMA_MODEL_PATH).resolve() == model_path.resolve()
+                same_config = (
+                    LLAMA_CONTEXT_SIZE == int(config["context_size"])
+                    and str(LLAMA_GPU_LAYERS) == str(config["gpu_layers"])
+                )
+                if not (server_ready and same_model and same_config):
+                    stop_owned_llama()
+
+            LLAMA_MODEL_PATH = str(model_path.resolve())
+            LLAMA_CONTEXT_SIZE = int(config["context_size"])
+            LLAMA_THREADS = int(config["threads"])
+            LLAMA_GPU_LAYERS = str(config["gpu_layers"])
+            MODEL_ID = model_id
+
+            if not await llama_is_ready():
+                await start_llama_if_needed()
 
         if not await llama_is_ready():
-            await start_llama_if_needed()
-
-    if not await llama_is_ready():
-        raise HTTPException(
-            status_code=502,
-            detail=llama_start_error or "llama.cpp did not become ready with the selected model",
-        )
+            raise HTTPException(
+                status_code=502,
+                detail=llama_start_error or "llama.cpp did not become ready with the selected model",
+            )
 
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(
-                f"{LLAMA_BASE_URL}/v1/chat/completions",
-                json={
-                    "model": MODEL_ID,
-                    "messages": [{"role": "user", "content": "Reply with the word READY."}],
-                    "max_tokens": 12,
-                    "temperature": 0,
-                    "stream": False,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            choices = payload.get("choices") or []
-            answer = choices[0].get("message", {}).get("content", "") if choices else ""
-            if not isinstance(answer, str) or not answer.strip():
-                raise ValueError("The model returned no text")
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        if ENGINE_V1_ENABLED and engine_v1_supervisor is not None and GenerationRequest is not None:
+            chunks = [
+                chunk async for chunk in engine_v1_supervisor.generate(
+                    GenerationRequest(
+                        prompt="Reply with the word READY.",
+                        max_tokens=12,
+                        temperature=0.0,
+                        messages=[{"role": "user", "content": "Reply with the word READY."}],
+                    )
+                )
+            ]
+            answer = "".join(chunk.text for chunk in chunks)
+        else:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                response = await client.post(
+                    f"{LLAMA_BASE_URL}/v1/chat/completions",
+                    json={
+                        "model": MODEL_ID,
+                        "messages": [{"role": "user", "content": "Reply with the word READY."}],
+                        "max_tokens": 12,
+                        "temperature": 0,
+                        "stream": False,
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                choices = payload.get("choices") or []
+                answer = choices[0].get("message", {}).get("content", "") if choices else ""
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("The model returned no text")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, EngineError) as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Model server started but the generation smoke test failed: {exc}",
@@ -1670,11 +1764,15 @@ async def get_installer_runtime() -> dict[str, Any]:
                 LLAMA_SERVER_EXE = str(Path(saved_path).resolve())
     except (sqlite3.Error, ValueError, TypeError):
         pass
+    executable = Path(LLAMA_SERVER_EXE).expanduser()
     return {
-        "executable_path": LLAMA_SERVER_EXE,
-        "exists": Path(LLAMA_SERVER_EXE).is_file(),
+        "executable_path": str(executable),
+        "exists": executable.is_file(),
         "runtime": "llama.cpp",
-        "note": "If no runtime is found, Brahma Desk installs the official Windows x64 CPU build automatically, or you can select an existing compatible llama-server.exe.",
+        "note": (
+            "Using the configured llama.cpp server runtime. Choose an existing llama-server.exe "
+            "to preserve CUDA support; the CPU runtime installer is optional."
+        ),
     }
 
 @app.post("/api/installer/runtime/install")
