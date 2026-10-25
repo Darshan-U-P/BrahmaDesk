@@ -50,7 +50,7 @@ int main(){
   for(int j=4;j<8;++j){
     const auto s=expected_scales[std::size_t(j)];
     const auto m=expected_mins[std::size_t(j)];
-    q4_block[4+std::size_t(j)]=static_cast<std::uint8_t>(
+    q4_block[8+std::size_t(j)]=static_cast<std::uint8_t>(
       ((s&0x0f)|((m&0x0f)<<4)));
     q4_block[std::size_t(j)]=static_cast<std::uint8_t>(
       q4_block[std::size_t(j)]|((s>>4)<<6));
@@ -69,9 +69,9 @@ int main(){
     mins[std::size_t(j)]=q4_block[8+std::size_t(j)]&0x3f;
   }
   for(int j=4;j<8;++j){
-    scales[std::size_t(j)]=(q4_block[4+std::size_t(j)]&0x0f)|
+    scales[std::size_t(j)]=(q4_block[8+std::size_t(j)]&0x0f)|
       ((q4_block[std::size_t(j)]>>6)<<4);
-    mins[std::size_t(j)]=(q4_block[4+std::size_t(j)]>>4)|
+    mins[std::size_t(j)]=(q4_block[8+std::size_t(j)]>>4)|
       ((q4_block[4+std::size_t(j)]>>6)<<4);
   }
   for(int stripe=0;stripe<4;++stripe){
