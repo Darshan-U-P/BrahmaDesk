@@ -13,6 +13,7 @@ from .contracts import (
     ResourcePlan,
 )
 from .supervisor import EngineSupervisor
+from .llama_cpp_backend import LlamaCppServerBackend
 
 __all__ = [
     "EngineError",
@@ -26,4 +27,5 @@ __all__ = [
     "ModelArtifact",
     "ResourcePlan",
     "EngineSupervisor",
+    "LlamaCppServerBackend",
 ]
