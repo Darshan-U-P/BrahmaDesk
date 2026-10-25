@@ -625,6 +625,7 @@ async def start_engine_v1() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global engine_v1_supervisor
     await load_saved_llama_server_path()
     if ENGINE_V1_ENABLED:
         try:
@@ -639,7 +640,6 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
-        global engine_v1_supervisor
         if ENGINE_V1_ENABLED and engine_v1_supervisor is not None:
             try:
                 await engine_v1_supervisor.stop()
