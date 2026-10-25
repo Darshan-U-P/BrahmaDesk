@@ -19,6 +19,19 @@ const BACKEND_PORT = Number(process.env.BRAHMA_BACKEND_PORT || 8000);
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 const SHUTDOWN_TOKEN = crypto.randomBytes(32).toString("hex");
 const isDev = !app.isPackaged;
+
+// Prevent multiple app instances from racing to bind the fixed backend port.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
 function log(message) {
   console.log(`[Brahma Desk] ${message}`);
 }
@@ -542,6 +555,8 @@ async function chooseInstallationMode() {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
+
   // This is a focused desktop chat app; remove the default File/Edit/View menu.
   Menu.setApplicationMenu(null);
   try {
@@ -556,8 +571,22 @@ app.whenReady().then(async () => {
         return;
       }
 
-      startPackagedBackend();
-      await waitForBackend();
+      // Reuse a responsive local Brahma API instead of starting a second server
+      // that would fail to bind to 127.0.0.1:8000. A backend is ready even when
+      // no model is configured; model setup is handled inside the UI.
+      let backendReady = false;
+      try {
+        await waitForBackend(1800);
+        backendReady = true;
+        log("Found an existing responsive Brahma Desk backend.");
+      } catch {
+        // No backend responded; start the packaged process below.
+      }
+
+      if (!backendReady) {
+        startPackagedBackend();
+        await waitForBackend();
+      }
     }
 
     createWindow();
