@@ -23,10 +23,10 @@ The `--list-tensors` mode prints each validated tensor's name, dimensions, GGML 
 - [x] Tensor inventory CLI for inspecting model tensor names, shapes, types, sizes, and offsets.
 - [x] Synthetic tests for Q4_K block sizing, truncated payload rejection and unknown-type rejection.
 - [x] Initial Q4_K block/tensor dequantization implementation with deterministic known-value tests (needs independent real-model numerical validation).
-- [ ] Q6_K/Q5_K dequantization and broader quantization coverage.
+- [x] Initial Q6_K block/tensor dequantization with deterministic scalar-oracle tests; independent comparison against a trusted external implementation remains pending.\n- [ ] Q5_K dequantization and broader quantization coverage.
 - [x] Initial CPU float32 matrix multiplication, RMSNorm, SwiGLU activation, and elementwise addition with unit tests.
 - [x] Initial RoPE (interleaved and NeoX layouts) and single-sequence causal attention primitives with unit tests.
-- [ ] Qwen2 tensor-schema validation and feed-forward / complete transformer forward pass.
+- [x] Qwen2 tensor-schema validation for required standard tensor names, dimensions, layer count and key metadata.\n- [ ] GQA-aware attention and complete transformer-block forward pass.
 - [ ] Tokenizer and autoregressive generation.
 - [ ] CUDA kernels and RTX 3050 Ti benchmark.
 - [ ] Brahma Desk native-runtime adapter and accurate health status.
