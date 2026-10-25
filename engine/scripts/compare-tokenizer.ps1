@@ -5,7 +5,7 @@ param(
     [string]$LlamaTokenizer = "D:\all project\llama-b11552-bin-win-cuda-12.4-x64\llama-tokenize.exe"
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 foreach ($path in @($ModelPath, $BrahmaExe, $LlamaTokenizer)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required file not found: $path"
