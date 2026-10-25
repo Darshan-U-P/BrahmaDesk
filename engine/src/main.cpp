@@ -58,7 +58,22 @@ int main(int argc, char** argv) {
             const auto parsed = argc == 5 ? std::stoull(argv[4]) : 32ULL;
             if (parsed > 4096) throw std::runtime_error("max-new-tokens must not exceed 4096");
             brahma::Qwen2Runtime runtime(argv[1]);
-            std::cout << runtime.generate(argv[3], static_cast<std::size_t>(parsed)) << "\n";
+            const auto text = runtime.generate(argv[3], static_cast<std::size_t>(parsed));
+            std::cout << text << "\n";
+            const auto& stats = runtime.last_generation_stats();
+            std::cerr << "Performance stats (model construction excluded):\n"
+                      << "Prompt tokens: " << stats.prompt_tokens << "\n"
+                      << "Generated tokens: " << stats.generated_tokens << "\n"
+                      << "Prompt prefill: " << stats.prefill_seconds << " s";
+            if (stats.prompt_tokens > 0 && stats.prefill_seconds > 0.0)
+                std::cerr << " (" << static_cast<double>(stats.prompt_tokens) / stats.prefill_seconds
+                          << " prompt tokens/s)";
+            std::cerr << "\n"
+                      << "Decode loop: " << stats.decode_seconds << " s";
+            if (stats.generated_tokens > 0 && stats.decode_seconds > 0.0)
+                std::cerr << " (" << static_cast<double>(stats.generated_tokens) / stats.decode_seconds
+                          << " generated tokens/s)";
+            std::cerr << "\n";
             return 0;
         }
         if (mode == "--list-tensors") {
