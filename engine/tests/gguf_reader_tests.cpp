@@ -34,23 +34,62 @@ int main(){
   try{brahma::TensorInfo bad{"unknown",{32},999,0};(void)brahma::tensor_layout(bad,m.tensor_data_offset,m.tensor_data_offset+4096);}
   catch(const std::exception&){rejected=true;}
   req(rejected,"unknown type rejection");
-  // Non-uniform fixture exercises both scale/min decoding and nibble ordering.
+  // Deterministic differential-style test: compare production decoder with a
+  // scalar oracle following the documented Q4_K packed scale/min layout.
   std::array<std::uint8_t,144> q4_block{};
   q4_block[0]=0x00;q4_block[1]=0x40; // fp16 d = 2.0
   q4_block[2]=0x00;q4_block[3]=0x38; // fp16 dmin = 0.5
-  q4_block[4]=1;q4_block[5]=2;q4_block[6]=3;q4_block[7]=4;
-  q4_block[8]=5;q4_block[9]=6;q4_block[10]=7;q4_block[11]=8;
-  for(std::size_t i=16;i<144;++i)q4_block[i]=0x11; // low and high nibbles are both 1
+  // Give all eight 32-value groups distinct scales and minima, including
+  // values above 15 so the packed high-bit fields are exercised.
+  const std::array<int,8> expected_scales{17,18,19,20,21,22,23,24};
+  const std::array<int,8> expected_mins{25,26,27,28,29,30,31,32};
+  for(int j=0;j<4;++j){
+    q4_block[4+std::size_t(j)]=static_cast<std::uint8_t>(expected_scales[std::size_t(j)]);
+    q4_block[8+std::size_t(j)]=static_cast<std::uint8_t>(expected_mins[std::size_t(j)]);
+  }
+  for(int j=4;j<8;++j){
+    const auto s=expected_scales[std::size_t(j)];
+    const auto m=expected_mins[std::size_t(j)];
+    q4_block[4+std::size_t(j)]=static_cast<std::uint8_t>(
+      ((s&0x0f)|((m&0x0f)<<4)));
+    q4_block[std::size_t(j)]=static_cast<std::uint8_t>(
+      q4_block[std::size_t(j)]|((s>>4)<<6));
+    q4_block[4+std::size_t(j)]=static_cast<std::uint8_t>(
+      q4_block[4+std::size_t(j)]|((m>>4)<<6));
+  }
+  for(std::size_t i=16;i<144;++i)
+    q4_block[i]=static_cast<std::uint8_t>(((i*13u+7u)&0x0fu)|((((i*7u+3u)&0x0fu)<<4)));
   std::array<float,256> decoded{};
   brahma::dequantize_q4_k_block(q4_block,decoded);
-  for(std::size_t i=0;i<32;++i)req(decoded[i]==-0.5f,"Q4_K scale/min group 0 low nibbles");
-  for(std::size_t i=32;i<64;++i)req(decoded[i]==1.0f,"Q4_K scale/min group 0 high nibbles");
-  for(std::size_t i=64;i<96;++i)req(decoded[i]==2.5f,"Q4_K scale/min group 1 low nibbles");
-  for(std::size_t i=96;i<128;++i)req(decoded[i]==4.0f,"Q4_K scale/min group 1 high nibbles");
-  for(std::size_t i=128;i<256;++i)req(decoded[i]==0.0f,"Q4_K zero-scale groups");
+  // Independent scalar oracle: decode all eight packed scale/min entries,
+  // then apply the serialized low/high nibble order for each 64-value stripe.
+  std::array<int,8> scales{},mins{};
+  for(int j=0;j<4;++j){
+    scales[std::size_t(j)]=q4_block[4+std::size_t(j)]&0x3f;
+    mins[std::size_t(j)]=q4_block[8+std::size_t(j)]&0x3f;
+  }
+  for(int j=4;j<8;++j){
+    scales[std::size_t(j)]=(q4_block[4+std::size_t(j)]&0x0f)|
+      ((q4_block[std::size_t(j)]>>6)<<4);
+    mins[std::size_t(j)]=(q4_block[4+std::size_t(j)]>>4)|
+      ((q4_block[4+std::size_t(j)]>>6)<<4);
+  }
+  for(int stripe=0;stripe<4;++stripe){
+    for(int k=0;k<32;++k){
+      const auto packed=q4_block[16+std::size_t(stripe)*32+std::size_t(k)];
+      const float low=2.0f*float(scales[std::size_t(stripe*2)])*float(packed&0x0f)
+        -0.5f*float(mins[std::size_t(stripe*2)]);
+      const float high=2.0f*float(scales[std::size_t(stripe*2+1)])*float(packed>>4)
+        -0.5f*float(mins[std::size_t(stripe*2+1)]);
+      req(decoded[std::size_t(stripe)*64+std::size_t(k)]==low,
+          "Q4_K scalar oracle low nibble");
+      req(decoded[std::size_t(stripe)*64+32+std::size_t(k)]==high,
+          "Q4_K scalar oracle high nibble");
+    }
+  }
   std::vector<std::uint8_t> q4_payload(q4_block.begin(),q4_block.end());
   const auto decoded_vector=brahma::dequantize_q4_k(q4_payload,256);
-  req(decoded_vector.size()==256&&decoded_vector[0]==-0.5f&&decoded_vector[127]==4.0f,
+  req(decoded_vector.size()==256&&decoded_vector[0]==decoded[0]&&decoded_vector[255]==decoded[255],
       "Q4_K tensor dequantization");
   rejected=false;
   try{(void)brahma::dequantize_q4_k(q4_payload,255);}catch(const std::exception&){rejected=true;}
