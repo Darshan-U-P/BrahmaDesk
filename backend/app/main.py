@@ -1615,7 +1615,6 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="Configure this model before activation")
 
     if ENGINE_V1_ENABLED:
-        global engine_v1_supervisor
         # Engine v1 owns its process through the supervisor, separate from the
         # legacy process variables below. Never stop a process we did not create.
         if engine_v1_supervisor is not None:
