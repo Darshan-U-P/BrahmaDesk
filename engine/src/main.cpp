@@ -23,6 +23,7 @@ void print_usage() {
         << "  brahma-engine <model.gguf> --validate-qwen2\n"
         << "  brahma-engine <model.gguf> --generate \"prompt\" [max-new-tokens]\n"
         << "  brahma-engine <model.gguf> --tokenize \"text\"\n"
+        << "  brahma-engine <model.gguf> --tokenize-utf8-hex <hex-bytes>\n"
         << "  brahma-engine <model.gguf> --logits \"id,id,id\"\n"
         << "Native Qwen2 CPU inference supports F32, F16, Q4_K and Q6_K tensors.\n";
 }
@@ -48,15 +49,15 @@ void print_tensor_list(const brahma::TensorRegistry& registry) {
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 5) { print_usage(); return 2; }
     const std::string mode = argc >= 3 ? argv[2] : "";
-    if (mode == "--generate" || mode == "--tokenize" || mode == "--logits") {
-        if ((mode == "--generate" && argc != 4 && argc != 5) || ((mode == "--tokenize" || mode == "--logits") && argc != 4)) { print_usage(); return 2; }
+    if (mode == "--generate" || mode == "--tokenize" || mode == "--tokenize-utf8-hex" || mode == "--logits") {
+        if ((mode == "--generate" && argc != 4 && argc != 5) || ((mode == "--tokenize" || mode == "--tokenize-utf8-hex" || mode == "--logits") && argc != 4)) { print_usage(); return 2; }
     } else if ((argc != 2 && argc != 3) ||
                (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2")) {
         print_usage(); return 2;
     }
 
     try {
-        if (mode == "--tokenize" || mode == "--logits") {
+        if (mode == "--tokenize" || mode == "--tokenize-utf8-hex" || mode == "--logits") {
             brahma::Qwen2Runtime runtime(argv[1]);
             if (mode == "--logits") {
                 std::vector<std::uint32_t> ids;
@@ -73,7 +74,27 @@ int main(int argc, char** argv) {
                 for (std::size_t i = 0; i < values.size(); ++i) std::cout << i << ',' << values[i] << '\n';
                 return 0;
             }
-            const auto ids = runtime.tokenize(argv[3]);
+            std::string input_text;
+            if (mode == "--tokenize-utf8-hex") {
+                const std::string hex = argv[3];
+                if (hex.size() % 2 != 0) throw std::runtime_error("--tokenize-utf8-hex requires an even number of hex digits");
+                input_text.reserve(hex.size() / 2);
+                const auto nibble = [](char ch) -> int {
+                    if (ch >= '0' && ch <= '9') return ch - '0';
+                    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+                    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+                    return -1;
+                };
+                for (std::size_t i = 0; i < hex.size(); i += 2) {
+                    const int hi = nibble(hex[i]);
+                    const int lo = nibble(hex[i + 1]);
+                    if (hi < 0 || lo < 0) throw std::runtime_error("--tokenize-utf8-hex contains a non-hex character");
+                    input_text.push_back(static_cast<char>((hi << 4) | lo));
+                }
+            } else {
+                input_text = argv[3];
+            }
+            const auto ids = runtime.tokenize(input_text);
             std::cout << "Tokenizer IDs (" << ids.size() << " tokens):";
             for (const auto id : ids) std::cout << ' ' << id;
             std::cout << "\nBackend: " << brahma::Qwen2Runtime::parallel_backend() << "\n";
