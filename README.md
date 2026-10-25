@@ -17,7 +17,7 @@ The project is designed for a single machine. It does not currently provide clou
 - Includes a user-controlled Update Center for checking, downloading, and installing packaged releases.
 - Packages the desktop application and FastAPI backend into a Windows x64 NSIS installer.
 
-The llama.cpp executable and GGUF model are not bundled. They must be supplied and configured on each machine.
+The llama.cpp executable and GGUF model are not bundled. They must be supplied and configured on each machine. The source-development fallback for `LLAMA_SERVER_EXE` points to `D:\\all project\\llama-b11552-bin-win-cuda-12.4-x64\\llama-server.exe`; on another machine, set `LLAMA_SERVER_EXE` or use the installer runtime picker. The persistent Engine v1 adapter is enabled by default; set `BRAHMA_ENGINE_V1_ENABLED=0` to use the legacy server path temporarily.
 
 ## Project Layout
 
@@ -94,7 +94,7 @@ The development frontend targets `http://127.0.0.1:8000`. Keep the backend runni
 | `BRAHMA_DATA_DIR` | Override the local data directory | `%APPDATA%\brahma-desk` |
 | `BRAHMA_BACKEND_PORT` | Backend port | `8000` |
 | `LLAMA_BASE_URL` | llama.cpp API base URL | `http://127.0.0.1:8080` |
-| `LLAMA_SERVER_EXE` | Path to the llama.cpp server executable | Developer-machine fallback in source |
+| `LLAMA_SERVER_EXE` | Path to the llama.cpp server executable | `D:\\all project\\llama-b11552-bin-win-cuda-12.4-x64\\llama-server.exe` in source development; set per machine or in the runtime picker |
 | `LLAMA_MODEL_PATH` | Path to the GGUF model | Developer-machine fallback in source |
 | `LLAMA_HOST` | Bind address for a backend-managed model server | `127.0.0.1` |
 | `LLAMA_PORT` | Port for a backend-managed model server | `8080` |
