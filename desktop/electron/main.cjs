@@ -102,12 +102,34 @@ function waitForBackend(timeoutMs = 150000) {
 // Start the packaged backend
 // ---------------------------------------------------------------------------
 
+function readInstallerSelection() {
+  const selectionPath = path.join(app.getPath("appData"), "brahma-desk", "install-selection.ini");
+  try {
+    const contents = fs.readFileSync(selectionPath, "utf8");
+    const values = {};
+    for (const line of contents.split(/\\r?\\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(";") || trimmed.startsWith("#") || trimmed.startsWith("[")) continue;
+      const separator = trimmed.indexOf("=");
+      if (separator < 0) continue;
+      values[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1).trim();
+    }
+    return values;
+  } catch (error) {
+    if (error.code !== "ENOENT") log(`Could not read installer component selections: ${error.message}`);
+    return {};
+  }
+}
+
 function startPackagedBackend() {
   const executable = path.join(
     process.resourcesPath,
     "backend",
     "brahma-backend.exe"
   );
+  const selection = readInstallerSelection();
+  const selectedRuntime = selection.llama_server_path || "";
+  const selectedModel = selection.model_path || "";
 
   if (!fs.existsSync(executable)) {
     throw new Error(
@@ -127,8 +149,8 @@ function startPackagedBackend() {
       BRAHMA_BACKEND_PORT: String(BACKEND_PORT),
       BRAHMA_SHUTDOWN_TOKEN: SHUTDOWN_TOKEN,
       BRAHMA_DATA_DIR: app.getPath("userData"),
-      BRAHMA_PACKAGED_LLAMA_SERVER_EXE: path.join(process.resourcesPath, "llama-runtime", "llama-server.exe"),
-      BRAHMA_BUNDLED_MODEL_PATH: path.join(process.resourcesPath, "bundled-model", "Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
+      BRAHMA_PACKAGED_LLAMA_SERVER_EXE: selectedRuntime,
+      BRAHMA_SELECTED_MODEL_PATH: selectedModel,
     },
   });
 

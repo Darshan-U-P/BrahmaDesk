@@ -511,6 +511,13 @@ async def scan_local_models() -> dict[str, Any]:
                             candidates[str(path.resolve()).casefold()] = path
         except OSError:
             continue
+    # Always honor an explicitly selected installer model, even on the first clean scan.
+    selected_model = os.getenv("BRAHMA_SELECTED_MODEL_PATH", "").strip()
+    if selected_model:
+        selected_path = Path(selected_model).expanduser()
+        if selected_path.suffix.casefold() == ".gguf" and selected_path.is_file():
+            candidates[str(selected_path.resolve()).casefold()] = selected_path
+
     if not clean_first_scan:
         for path in _running_llama_model_paths():
             candidates[str(path.resolve()).casefold()] = path

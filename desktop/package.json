@@ -11,7 +11,7 @@
     "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-llama-runtime.ps1",
     "stage:model": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-bundled-model.ps1",
     "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../backend/build_backend.ps1",
-    "dist:win": "npm run build && npm run stage:runtime && npm run stage:model && npm run build:backend && electron-builder --win nsis",
+    "dist:win": "npm run build && npm run build:backend && electron-builder --win nsis",
     "dist:dir": "npm run build && electron-builder --dir"
   },
   "dependencies": {
@@ -54,14 +54,6 @@
       {
         "from": "../backend/dist/brahma-backend.exe",
         "to": "backend/brahma-backend.exe"
-      },
-      {
-        "from": "build/llama-runtime",
-        "to": "llama-runtime"
-      },
-      {
-        "from": "build/bundled-model",
-        "to": "bundled-model"
       }
     ],
     "win": {
@@ -100,7 +92,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Brahma Desk",
-      "runAfterFinish": true
+      "runAfterFinish": true,
+      "include": "build/installer-components.nsh"
     }
   }
 }
