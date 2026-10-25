@@ -35,6 +35,12 @@ void causal_attention_f32(
     std::size_t head_dim,
     float scale = 0.0f);
 
+// Elementwise residual/bias addition. All spans must have equal nonzero length.
+void add_f32(
+    std::span<const float> a,
+    std::span<const float> b,
+    std::span<float> output);
+
 // SwiGLU activation: output[i] = SiLU(gate[i]) * up[i].
 void swiglu_f32(
     std::span<const float> gate,
