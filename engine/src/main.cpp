@@ -1,18 +1,84 @@
 #include "brahma/gguf_reader.hpp"
+#include "brahma/tensor_registry.hpp"
 #include "brahma/tensor_validator.hpp"
+
+#include <cstdint>
 #include <exception>
 #include <iostream>
-int main(int argc,char**argv){
- if(argc!=2){std::cerr<<"Usage: brahma-engine <model.gguf>\nBrahma Engine 0.2: GGUF inspection and tensor payload validation; inference is not implemented yet.\n";return 2;}
- try{
-  auto m=brahma::GgufReader::inspect(argv[1]);
-  auto layouts=brahma::validate_tensor_payloads(m,argv[1]);
-  std::uint64_t total=0;
-  for(const auto& t:layouts){if(t.bytes>UINT64_MAX-total)throw std::runtime_error("Total tensor byte count overflow");total+=t.bytes;}
-  std::cout<<"Brahma Engine Core 0.2\nGGUF version: "<<m.version<<"\nArchitecture: "<<(m.architecture().empty()?"(not declared)":m.architecture())
-   <<"\nMetadata entries: "<<m.metadata.size()<<"\nTensor descriptors: "<<m.tensors.size()<<"\nTensor data offset: "<<m.tensor_data_offset
-   <<"\nAlignment: "<<m.alignment<<"\nVocabulary entries: "<<m.vocabulary_size()<<"\nPayload validation: PASS"
-   <<"\nValidated tensor payload bytes: "<<total<<"\nInference: NOT IMPLEMENTED\n";
-  return 0;
- }catch(const std::exception&e){std::cerr<<"Brahma Engine error: "<<e.what()<<"\n";return 1;}
+#include <string>
+
+namespace {
+void print_usage() {
+    std::cerr
+        << "Usage:\n"
+        << "  brahma-engine <model.gguf>\n"
+        << "  brahma-engine <model.gguf> --list-tensors\n"
+        << "Brahma Engine Core: GGUF inspection and tensor payload validation; inference is not implemented yet.\n";
+}
+
+void print_tensor_list(const brahma::TensorRegistry& registry) {
+    std::cout << "Tensor count: " << registry.model().tensors.size() << "\n";
+    for (const auto& tensor : registry.model().tensors) {
+        const auto& layout = registry.layout(tensor.name);
+        std::cout << tensor.name << " | shape=[";
+        for (std::size_t i = 0; i < tensor.dimensions.size(); ++i) {
+            if (i) std::cout << ',';
+            std::cout << tensor.dimensions[i];
+        }
+        std::cout << "] | type=" << brahma::ggml_type_name(tensor.ggml_type)
+                  << " (" << tensor.ggml_type << ")"
+                  << " | elements=" << layout.elements
+                  << " | bytes=" << layout.bytes
+                  << " | offset=" << layout.absolute_offset << "\n";
+    }
+}
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc != 2 && argc != 3) {
+        print_usage();
+        return 2;
+    }
+
+    const std::string mode = argc == 3 ? argv[2] : "";
+    if (!mode.empty() && mode != "--list-tensors") {
+        print_usage();
+        return 2;
+    }
+
+    try {
+        auto model = brahma::GgufReader::inspect(argv[1]);
+        brahma::TensorRegistry registry(std::move(model), argv[1]);
+
+        if (mode == "--list-tensors") {
+            print_tensor_list(registry);
+            return 0;
+        }
+
+        std::uint64_t total = 0;
+        for (const auto& tensor : registry.model().tensors) {
+            const auto bytes = registry.layout(tensor.name).bytes;
+            if (bytes > UINT64_MAX - total) {
+                throw std::runtime_error("Total tensor byte count overflow");
+            }
+            total += bytes;
+        }
+
+        const auto& info = registry.model();
+        std::cout << "Brahma Engine Core 0.3\n"
+                  << "GGUF version: " << info.version << "\n"
+                  << "Architecture: " << (info.architecture().empty() ? "(not declared)" : info.architecture()) << "\n"
+                  << "Metadata entries: " << info.metadata.size() << "\n"
+                  << "Tensor descriptors: " << info.tensors.size() << "\n"
+                  << "Tensor data offset: " << info.tensor_data_offset << "\n"
+                  << "Alignment: " << info.alignment << "\n"
+                  << "Vocabulary entries: " << info.vocabulary_size() << "\n"
+                  << "Payload validation: PASS\n"
+                  << "Validated tensor payload bytes: " << total << "\n"
+                  << "Inference: NOT IMPLEMENTED\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "Brahma Engine error: " << error.what() << "\n";
+        return 1;
+    }
 }
