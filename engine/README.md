@@ -9,7 +9,10 @@ cmake -S engine -B engine/build -A x64
 cmake --build engine/build --config Release
 ctest --test-dir engine/build -C Release --output-on-failure
 .\engine\build\Release\brahma-engine.exe "C:\path\to\model.gguf"
+.\engine\build\Release\brahma-engine.exe "C:\path\to\model.gguf" --list-tensors
 ```
+
+The `--list-tensors` mode prints each validated tensor's name, dimensions, GGML type, element count, serialized byte count, and absolute file offset. This is a diagnostic inventory for mapping a real model architecture; it does not load all tensor payloads into RAM.
 
 ## Current implementation status
 
@@ -17,17 +20,18 @@ ctest --test-dir engine/build -C Release --output-on-failure
 - [x] Named GGUF tensor payload loading and indexed metadata registry; raw quantized bytes are preserved and loaded on demand.
 - [x] Tensor element-count overflow checks and payload byte sizing for F32, F16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K and basic integer/f64 types.
 - [x] Tensor payload bounds, alignment, and overlap validation.
+- [x] Tensor inventory CLI for inspecting model tensor names, shapes, types, sizes, and offsets.
 - [x] Synthetic tests for Q4_K block sizing, truncated payload rejection and unknown-type rejection.
-- [x] Initial Q4_K block/tensor dequantization implementation with deterministic known-value tests (needs Windows CI and real-model numerical validation).
+- [x] Initial Q4_K block/tensor dequantization implementation with deterministic known-value tests (needs independent real-model numerical validation).
 - [ ] Q6_K/Q5_K dequantization and broader quantization coverage.
 - [x] Initial CPU float32 matrix multiplication, RMSNorm, SwiGLU activation, and elementwise addition with unit tests.
 - [x] Initial RoPE (interleaved and NeoX layouts) and single-sequence causal attention primitives with unit tests.
-- [ ] Qwen2 feed-forward and complete transformer forward pass.
+- [ ] Qwen2 tensor-schema validation and feed-forward / complete transformer forward pass.
 - [ ] Tokenizer and autoregressive generation.
 - [ ] CUDA kernels and RTX 3050 Ti benchmark.
 - [ ] Brahma Desk native-runtime adapter and accurate health status.
 
-**Important:** current executable validates model layout only. It does not yet decode tensor values or generate tokens. The quantized payload validator intentionally fails closed on tensor types whose block layout has not been added.
+**Important:** the executable validates model layout only. It does not yet run transformer inference or generate tokens. The quantized payload validator intentionally fails closed on tensor types whose block layout has not been added.
 
 ## GGUF format reference
 
