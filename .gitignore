@@ -89,3 +89,14 @@ rollback-backups/
 
 # Timestamped backup files
 *.bak-*
+# Local Brahma Engine build output
+/engine/build-llama/
+/engine/build-serial/
+/engine/CMakeLists.txt.backup
+# Local benchmark and diagnostic output
+/brahma-benchmark*.csv
+/brahma_hello_logits.csv
+/brahma_logits.csv
+/engine/qwen-tensor-inventory.txt
+# Local llama.cpp branding backup
+/third_party/llama.cpp/tools/cli/cli-context.cpp.brahma-backup
