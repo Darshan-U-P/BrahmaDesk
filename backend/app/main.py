@@ -598,8 +598,8 @@ async def start_engine_v1() -> None:
     # The Engine v1 adapter starts its own server on an allocated port only
     # when no server is already available at the configured endpoint.
     if await llama_is_ready():
-        # The API endpoint may belong to an unrelated server. Do not attach the
-        # Engine supervisor to an external process or shut it down on app exit.
+        # Do not attach the Engine supervisor to an external process.
+        # It remains under the existing legacy HTTP streaming route.
         print(
             f"[Brahma Desk] Existing llama.cpp endpoint detected at {LLAMA_BASE_URL}; "
             "leaving it external and using the standard HTTP streaming path.",
@@ -637,6 +637,11 @@ async def lifespan(_: FastAPI):
             # Leave the backend available for runtime reconfiguration and let
             # /api/health expose the startup failure; do not start a second process.
             engine_v1_supervisor = None
+            if await llama_is_ready():
+                print(
+                    f"[Brahma Desk] Existing llama.cpp endpoint is available at {LLAMA_BASE_URL}.",
+                    flush=True,
+                )
     else:
         await start_llama_if_needed()
     try:
