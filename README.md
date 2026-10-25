@@ -323,7 +323,7 @@ Bug reports, feature suggestions, and improvement ideas are welcome. When report
 Brahma Desk's custom lotus/atomic logo source is maintained at `desktop/build/logo.svg`, with branded installer artwork source at `desktop/build/installer-artwork.svg`. Windows packaging is configured to use `desktop/build/icon.ico`. The MSI provides Start Menu and desktop shortcuts and launches Brahma Desk after setup. The app then offers a one-time installation-mode choice for that version.
 
 Before publishing a production installer, validate on Windows: clean install, upgrade from v0.1.2, profile persistence, existing GGUF discovery, model download cancellation/retry/integrity verification, updater download/install/restart, and uninstall data-preservation behavior. Do not mark the release verified until those tests pass on a built installer.
-## Windows MSI build (0.2.4 preview)
+## Windows MSI build (0.2.5 preview)
 
 The Windows release target is a WiX-based MSI. The build stages a local llama.cpp runtime into the installer so the installed backend can use the bundled `llama-server.exe` and its adjacent DLLs.
 
@@ -339,11 +339,11 @@ The runtime directory must contain `llama-server.exe` and all DLLs shipped with 
 
 On first launch, Brahma Desk scans its managed model folder and common user model folders. If no supported local GGUF is discovered and the bundled runtime is available, it automatically downloads the recommended model from Hugging Face, checks available disk space and integrity metadata, then validates and activates it. This first-run download requires an internet connection; the MSI itself does not contain the multi-gigabyte model.
 
-MSI artifacts are written to `desktop/release/BrahmaDesk-Setup-0.2.4.msi`.
+MSI artifacts are written to `desktop/release/BrahmaDesk-Setup-0.2.5.msi`.
 
 
-### Clean installation behavior (0.2.4 preview)
+### Clean installation behavior (0.2.5 preview)
 
-The MSI's `runAfterFinish` launches Brahma Desk, and the application presents the installation-mode choice before starting the backend. This keeps the normal MSI upgrade path data-preserving while providing an explicitly confirmed clean reset. The choice is shown once per application version. Choosing Clean installation removes the managed Brahma Desk data directory and its downloaded models, then triggers fresh recommended-model setup rather than reusing GGUFs found in common external folders. The clean reset does not remove model files stored outside Brahma Desk's managed directory.
+The MSI's `runAfterFinish` launches Brahma Desk, and the application presents the installation-mode choice before starting the backend. This keeps the normal MSI upgrade path data-preserving while providing an explicitly confirmed clean reset. The choice is shown once per application version before the backend starts. Do not publish a build unless the dialog is observed in a packaged smoke test. Choosing Clean installation removes the managed Brahma Desk data directory and its downloaded models, then triggers fresh recommended-model setup rather than reusing GGUFs found in common external folders. The clean reset does not remove model files stored outside Brahma Desk's managed directory.
 
 Validate both modes on a Windows test account before publishing: standard upgrade must retain the database and models; clean installation must clear chats/profiles/settings/memories and managed models, then download and activate the recommended model.
