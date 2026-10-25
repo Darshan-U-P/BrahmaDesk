@@ -683,7 +683,7 @@ app.include_router(installer_router)
 
 async def load_saved_llama_server_path() -> None:
     """Restore the selected runtime and verified model configuration before startup."""
-    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
+    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, LLAMA_LOAD_MODE, MODEL_ID
     try:
         if __package__:
             from . import installer as installer_service
@@ -712,6 +712,9 @@ async def load_saved_llama_server_path() -> None:
                 LLAMA_CONTEXT_SIZE = int(config.get("context_size", LLAMA_CONTEXT_SIZE))
                 LLAMA_THREADS = int(config.get("threads", LLAMA_THREADS))
                 LLAMA_GPU_LAYERS = str(config.get("gpu_layers", LLAMA_GPU_LAYERS))
+                saved_mode = str(config.get("mode", LLAMA_LOAD_MODE)).strip().lower()
+                if saved_mode in {"auto", "cpu", "hybrid", "gpu"}:
+                    LLAMA_LOAD_MODE = saved_mode
                 MODEL_ID = str(config.get("model_id", MODEL_ID))
     except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
         # Keep the environment/default path if no valid saved runtime is available.
