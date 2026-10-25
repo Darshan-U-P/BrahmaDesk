@@ -74,6 +74,19 @@ def test_cpu_plan_reports_zero_estimated_vram(tmp_path: Path) -> None:
     assert plan.estimated_vram_gb == 0.0
 
 
+def test_default_auto_gpu_offload_is_conservative(tmp_path: Path) -> None:
+    model = tmp_path / "valid.gguf"
+    model.write_bytes(b"GGUF" + b"x" * 1024)
+    executable = tmp_path / "llama-server.exe"
+    executable.write_bytes(b"placeholder")
+    backend = LlamaCppServerBackend(executable)
+    artifact = asyncio.run(backend.inspect_model(model))
+
+    plan = asyncio.run(backend.plan(artifact, EngineSettings(context_size=2048, mode="auto")))
+
+    assert plan.selected_mode == "auto"
+
+
 def test_stop_does_not_touch_process_when_none_is_owned(tmp_path: Path) -> None:
     backend = LlamaCppServerBackend(tmp_path / "llama-server.exe")
 
