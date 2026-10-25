@@ -172,19 +172,31 @@ class BrahmaNativeBackend:
             },
         )
 
-    @staticmethod
-    def _format_prompt(request: GenerationRequest) -> str:
+    def _format_prompt(self, request: GenerationRequest) -> str:
         messages = request.messages or [{"role": "user", "content": request.prompt}]
-        # The current CLI accepts one raw prompt, not a structured messages array.
-        # Preserve system instructions and prior turns as an explicit transcript.
-        parts: list[str] = []
+        # The current CLI tokenizes a raw prompt rather than applying the GGUF
+        # chat template itself. Use Qwen's native template for the default Qwen
+        # models; retain an explicit transcript for other architectures.
+        if self._model and "qwen" in self._model.model_id.casefold():
+            parts: list[str] = []
+            for message in messages:
+                role = str(message.get("role", "user")).strip().lower()
+                if role not in {"system", "user", "assistant"}:
+                    role = "user"
+                content = str(message.get("content", "")).strip()
+                if content:
+                    parts.append(f"<|im_start|>{role}\\n{content}<|im_end|>")
+            parts.append("<|im_start|>assistant\\n")
+            return "\\n".join(parts)
+
+        parts = []
         for message in messages:
             role = str(message.get("role", "user")).strip().upper()
             content = str(message.get("content", "")).strip()
             if content:
-                parts.append(f"{role}:\n{content}")
+                parts.append(f"{role}:\\n{content}")
         parts.append("ASSISTANT:")
-        return "\n\n".join(parts)
+        return "\\n\\n".join(parts)
 
     async def generate(
         self, request: GenerationRequest
