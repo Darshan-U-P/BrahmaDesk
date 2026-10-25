@@ -133,17 +133,15 @@ std::vector<float> quantized_linear_vector(std::span<const float> input,
     for (std::int64_t row_i = 0; row_i < static_cast<std::int64_t>(output_width); ++row_i) {
         const auto row = static_cast<std::size_t>(row_i);
         float sum = 0.0f;
-        std::array<float, 256> decoded{};
         for (std::size_t b = 0; b < blocks_per_row; ++b) {
             const auto block_index = row * blocks_per_row + b;
             const auto* p = tensor.payload.data() + block_index * block_bytes;
-            if (type == 12)
-                dequantize_q4_k_block(std::span<const std::uint8_t, 144>(p, 144), decoded);
-            else
-                dequantize_q6_k_block(std::span<const std::uint8_t, 210>(p, 210), decoded);
             const auto input_offset = b * block_values;
-            for (std::size_t j = 0; j < block_values; ++j)
-                sum += decoded[j] * input[input_offset + j];
+            const std::span<const float, 256> input_block(input.data() + input_offset, 256);
+            if (type == 12)
+                sum += dot_q4_k_block(std::span<const std::uint8_t, 144>(p, 144), input_block);
+            else
+                sum += dot_q6_k_block(std::span<const std::uint8_t, 210>(p, 210), input_block);
         }
         output[row] = sum;
     }
