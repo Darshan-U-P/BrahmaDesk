@@ -760,11 +760,6 @@ async def health() -> dict[str, Any]:
             return status
         except Exception as exc:
             status["startup_error"] = str(exc)
-    elif ENGINE_V1_ENABLED and not await llama_is_ready():
-        status["startup_error"] = status["startup_error"] or (
-            "No llama.cpp server is ready. Check the selected runtime and model in setup."
-        )
-
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(f"{LLAMA_BASE_URL}/v1/models")
@@ -779,6 +774,11 @@ async def health() -> dict[str, Any]:
 
     except (httpx.HTTPError, ValueError):
         pass
+
+    if ENGINE_V1_ENABLED and status["llama_server"] != "ok" and not status["startup_error"]:
+        status["startup_error"] = (
+            "No llama.cpp server is ready. Check the selected runtime and model in setup."
+        )
 
     return status
 
