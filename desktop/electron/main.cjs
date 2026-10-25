@@ -571,61 +571,69 @@ async function chooseInstallationMode() {
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
 
-  // This is a focused desktop chat app; remove the default File/Edit/View menu.
   Menu.setApplicationMenu(null);
   try {
     if (!isDev) {
-      // The setup choice must run before the backend opens the existing database.
-      // This is the first-run UX for MSI installs; it is intentionally separate
-      // from the MSI's native wizard.
       const continueStartup = await chooseInstallationMode();
       if (!continueStartup) {
         quitting = true;
         app.quit();
         return;
       }
-
-      // Reuse a responsive local Brahma API instead of starting a second server
-      // that would fail to bind to 127.0.0.1:8000. A backend is ready even when
-      // no model is configured; model setup is handled inside the UI.
-      let backendReady = false;
-      try {
-        await waitForBackend(1800);
-        backendReady = true;
-        log("Found an existing responsive Brahma Desk backend.");
-      } catch {
-        // No backend responded; start the packaged process below.
-      }
-
-      if (!backendReady) {
-        startPackagedBackend();
-        await waitForBackend();
-      }
     }
 
+    // Show the UI immediately. Backend startup can take time or fail; neither
+    // condition should leave an invisible Electron process in Task Manager.
     createWindow();
     configureUpdater();
+
+    if (!isDev) {
+      void (async () => {
+        try {
+          let backendReady = false;
+          try {
+            await waitForBackend(1800);
+            backendReady = true;
+            log("Found an existing responsive Brahma Desk backend.");
+          } catch {
+            // No responsive backend; launch the packaged backend below.
+          }
+          if (!backendReady) {
+            startPackagedBackend();
+            await waitForBackend(150000);
+          }
+          log("Brahma Desk backend is ready.");
+        } catch (error) {
+          log(`Backend startup failed: ${error.stack || error.message}`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            dialog.showMessageBox(mainWindow, {
+              type: "error",
+              title: "Brahma Desk backend did not start",
+              message: "The app window is open, but its local backend is unavailable.",
+              detail: `${error.message}\n\nLogs: ${path.join(app.getPath("userData"), "backend.log")}`,
+              buttons: ["OK"],
+              noLink: true,
+            });
+          }
+        }
+      })();
+    }
   } catch (error) {
     log(error.stack || error.message);
-
     dialog.showErrorBox(
       "Brahma Desk could not start",
       `${error.message}\n\nSee the application logs under:\n${app.getPath("userData")}`
     );
-
-    await stopBackend();
     app.quit();
+    return;
   }
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0 && !quitting) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0 && !quitting) createWindow();
   });
 });
 
 
-// ---------------------------------------------------------------------------
 // Controlled application shutdown
 // ---------------------------------------------------------------------------
 
