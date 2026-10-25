@@ -69,4 +69,53 @@ void dequantize_q6_k_block(std::span<const std::uint8_t,210> b,std::span<float,2
 std::vector<float> dequantize_q6_k(std::span<const std::uint8_t> p,std::size_t n) {
     return dequantize_blocks<210>(p,n,256,&dequantize_q6_k_block);
 }
+
+float dot_q4_k_block(std::span<const std::uint8_t,144> b,
+                     std::span<const float,256> input) noexcept {
+    const float d=half_to_float(u16le(b.data()));
+    const float dmin=half_to_float(u16le(b.data()+2));
+    const auto* qs=b.data()+16;
+    float sum=0.0f;
+    std::size_t input_pos=0;
+    for(int group=0;group<4;++group) {
+        int s1{},m1{},s2{},m2{};
+        get_scale_min(b,group*2,s1,m1);
+        get_scale_min(b,group*2+1,s2,m2);
+        const auto* q=qs+std::size_t(group)*32;
+        for(std::size_t i=0;i<32;++i) {
+            sum += (d*float(s1)*float(q[i]&0x0f)-dmin*float(m1))*input[input_pos+i];
+            sum += (d*float(s2)*float(q[i]>>4)-dmin*float(m2))*input[input_pos+32+i];
+        }
+        input_pos+=64;
+    }
+    return sum;
+}
+
+float dot_q6_k_block(std::span<const std::uint8_t,210> b,
+                     std::span<const float,256> input) noexcept {
+    const auto* ql=b.data();
+    const auto* qh=b.data()+128;
+    const auto* scales=reinterpret_cast<const std::int8_t*>(b.data()+192);
+    const float d=half_to_float(u16le(b.data()+208));
+    float sum=0.0f;
+    for(std::size_t half=0;half<2;++half) {
+        const auto* ql_half=ql+half*64;
+        const auto* qh_half=qh+half*32;
+        const auto* sc=scales+half*8;
+        const std::size_t base=half*128;
+        for(std::size_t l=0;l<32;++l) {
+            const int a=int(std::uint8_t((ql_half[l]&0x0f)|((qh_half[l]&0x03)<<4)))-32;
+            const int c=int(std::uint8_t((ql_half[l+32]&0x0f)|((qh_half[l]>>2&0x03)<<4)))-32;
+            const int e=int(std::uint8_t((ql_half[l]>>4)|((qh_half[l]>>4&0x03)<<4)))-32;
+            const int g=int(std::uint8_t((ql_half[l+32]>>4)|((qh_half[l]>>6)<<4)))-32;
+            const auto group=l/16;
+            sum += d*float(sc[group+0])*float(a)*input[base+l];
+            sum += d*float(sc[group+2])*float(c)*input[base+l+32];
+            sum += d*float(sc[group+4])*float(e)*input[base+l+64];
+            sum += d*float(sc[group+6])*float(g)*input[base+l+96];
+        }
+    }
+    return sum;
+}
+
 } // namespace brahma
