@@ -14,7 +14,7 @@ ctest --test-dir engine/build -C Release --output-on-failure
 ## Current implementation status
 
 - [x] GGUF v2/v3 metadata and tensor descriptor parsing.
-- [x] Named GGUF tensor payload loading with validation; raw quantized bytes are preserved.
+- [x] Named GGUF tensor payload loading and indexed metadata registry; raw quantized bytes are preserved and loaded on demand.
 - [x] Tensor element-count overflow checks and payload byte sizing for F32, F16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K and basic integer/f64 types.
 - [x] Tensor payload bounds, alignment, and overlap validation.
 - [x] Synthetic tests for Q4_K block sizing, truncated payload rejection and unknown-type rejection.
