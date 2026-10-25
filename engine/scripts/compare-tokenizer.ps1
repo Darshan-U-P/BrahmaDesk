@@ -12,12 +12,16 @@ foreach ($path in @($ModelPath, $BrahmaExe, $LlamaTokenizer)) {
     }
 }
 
+function From-CodePoints([int[]]$CodePoints) {
+    return -join ($CodePoints | ForEach-Object { [char]$_ })
+}
+
 $cases = @(
     "Hello, world! How are you?",
     "The quick brown fox jumps over 123 lazy dogs.",
     "C++ templates, std::vector<int>, and x == 42;",
-    "ನಮಸ್ಕಾರ, ನೀವು ಹೇಗಿದ್ದೀರಿ?",
-    "नमस्ते, आप कैसे हैं?",
+    (From-CodePoints @(0x0CA8,0x0CAE,0x0CB8,0x0CCD,0x0C95,0x0CBE,0x0CB0,0x002C,0x0020,0x0CA8,0x0CC0,0x0CB5,0x0CC1,0x0020,0x0CB9,0x0CC7,0x0C97,0x0CBF,0x0CA6,0x0CCD,0x0CA6,0x0CC0,0x0CB0,0x0CBF,0x003F)),
+    (From-CodePoints @(0x0928,0x092E,0x0938,0x094D,0x0924,0x0947,0x002C,0x0020,0x0906,0x092A,0x0020,0x0915,0x0948,0x0938,0x0947,0x0020,0x0939,0x0948,0x0902,0x003F)),
     ("Line one." + [Environment]::NewLine + "Line two."),
     "Email: test@example.com; URL: https://example.com/a?b=1",
     "I'm testing contractions: we're, they've, she'll, and don't.",
