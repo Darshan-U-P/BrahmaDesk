@@ -1,5 +1,6 @@
 #include "brahma/tensor_ops.hpp"
 #include <cmath>
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 
@@ -60,6 +61,91 @@ void rms_norm_f32(
         const float scale = 1.0f / std::sqrt(mean_square + epsilon);
         for (std::size_t col = 0; col < width; ++col) {
             output[offset + col] = input[offset + col] * scale * weight[col];
+        }
+    }
+}
+
+void rope_f32(
+    std::span<float> values,
+    std::size_t sequence_length,
+    std::size_t head_dim,
+    std::size_t position_offset,
+    float theta) {
+    const auto total = checked_product(sequence_length, head_dim, "RoPE shape overflow");
+    if (head_dim == 0 || head_dim % 2 != 0 || values.size() != total) {
+        throw std::invalid_argument("RoPE requires an even head dimension and matching input size");
+    }
+    if (!(theta > 0.0f) || !std::isfinite(theta)) {
+        throw std::invalid_argument("RoPE theta must be finite and positive");
+    }
+    for (std::size_t pos = 0; pos < sequence_length; ++pos) {
+        if (position_offset > std::numeric_limits<std::size_t>::max() - pos) {
+            throw std::overflow_error("RoPE position overflow");
+        }
+        const auto absolute_pos = position_offset + pos;
+        const auto row = pos * head_dim;
+        for (std::size_t pair = 0; pair < head_dim / 2; ++pair) {
+            const float exponent = static_cast<float>(2 * pair) / static_cast<float>(head_dim);
+            const float angle = static_cast<float>(absolute_pos) /
+                std::pow(theta, exponent);
+            const float cs = std::cos(angle);
+            const float sn = std::sin(angle);
+            const float x0 = values[row + pair * 2];
+            const float x1 = values[row + pair * 2 + 1];
+            values[row + pair * 2] = x0 * cs - x1 * sn;
+            values[row + pair * 2 + 1] = x0 * sn + x1 * cs;
+        }
+    }
+}
+
+void causal_attention_f32(
+    std::span<const float> q,
+    std::span<const float> k,
+    std::span<const float> v,
+    std::span<float> output,
+    std::size_t sequence_length,
+    std::size_t heads,
+    std::size_t head_dim,
+    float scale) {
+    const auto tokens_heads = checked_product(sequence_length, heads, "attention shape overflow");
+    const auto total = checked_product(tokens_heads, head_dim, "attention shape overflow");
+    if (sequence_length == 0 || heads == 0 || head_dim == 0 ||
+        q.size() != total || k.size() != total || v.size() != total || output.size() != total) {
+        throw std::invalid_argument("Attention input/output shape mismatch or empty dimensions");
+    }
+    if (scale == 0.0f) {
+        scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+    } else if (!std::isfinite(scale)) {
+        throw std::invalid_argument("Attention scale must be finite");
+    }
+    std::vector<float> scores(sequence_length);
+    for (std::size_t head = 0; head < heads; ++head) {
+        for (std::size_t query_pos = 0; query_pos < sequence_length; ++query_pos) {
+            float max_score = -std::numeric_limits<float>::infinity();
+            for (std::size_t key_pos = 0; key_pos <= query_pos; ++key_pos) {
+                float dot = 0.0f;
+                const auto q_offset = (query_pos * heads + head) * head_dim;
+                const auto k_offset = (key_pos * heads + head) * head_dim;
+                for (std::size_t d = 0; d < head_dim; ++d) {
+                    dot += q[q_offset + d] * k[k_offset + d];
+                }
+                scores[key_pos] = dot * scale;
+                max_score = std::max(max_score, scores[key_pos]);
+            }
+            double denominator = 0.0;
+            for (std::size_t key_pos = 0; key_pos <= query_pos; ++key_pos) {
+                scores[key_pos] = std::exp(scores[key_pos] - max_score);
+                denominator += static_cast<double>(scores[key_pos]);
+            }
+            const auto out_offset = (query_pos * heads + head) * head_dim;
+            for (std::size_t d = 0; d < head_dim; ++d) {
+                double weighted = 0.0;
+                for (std::size_t key_pos = 0; key_pos <= query_pos; ++key_pos) {
+                    const auto v_offset = (key_pos * heads + head) * head_dim;
+                    weighted += static_cast<double>(scores[key_pos]) * v[v_offset + d];
+                }
+                output[out_offset + d] = static_cast<float>(weighted / denominator);
+            }
         }
     }
 }
