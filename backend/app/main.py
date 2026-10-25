@@ -8,6 +8,7 @@ import secrets
 import socket
 import sqlite3
 import subprocess
+import shutil
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -640,8 +641,44 @@ async def start_engine_v1(*, force_owned: bool = False) -> None:
 
 
 @asynccontextmanager
+async def _install_bundled_model_if_needed() -> None:
+    """Copy the bundled default GGUF into writable per-user model storage once."""
+    source_value = os.getenv("BRAHMA_BUNDLED_MODEL_PATH", "").strip()
+    if not source_value:
+        return
+    source = Path(source_value).expanduser()
+    if not source.is_file():
+        print(f"[Brahma Desk] Bundled model resource not found: {source}", flush=True)
+        return
+    try:
+        if source.stat().st_size < 1024 * 1024:
+            raise ValueError("bundled model file is unexpectedly small")
+        with source.open("rb") as stream:
+            if stream.read(4) != b"GGUF":
+                raise ValueError("bundled model does not have a GGUF header")
+        if __package__:
+            from . import installer as installer_service
+        else:
+            import installer as installer_service
+        destination = installer_service.MODEL_DIR / "Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+        if destination.is_file() and destination.stat().st_size == source.stat().st_size:
+            print(f"[Brahma Desk] Bundled model already installed: {destination}", flush=True)
+            return
+        installer_service.MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        free_bytes = shutil.disk_usage(installer_service.MODEL_DIR).free
+        if free_bytes < source.stat().st_size + 512 * 1024 * 1024:
+            raise OSError("not enough free disk space to install the bundled model")
+        temporary = destination.with_suffix(destination.suffix + ".copying")
+        await asyncio.to_thread(shutil.copyfile, source, temporary)
+        temporary.replace(destination)
+        print(f"[Brahma Desk] Installed bundled model to {destination}", flush=True)
+    except (OSError, ValueError) as exc:
+        print(f"[Brahma Desk] Bundled model installation failed: {exc}", flush=True)
+
+
 async def lifespan(_: FastAPI):
     global engine_v1_supervisor, llama_start_error
+    await _install_bundled_model_if_needed()
     model_configured = await load_saved_llama_server_path()
     if not model_configured:
         # The desktop UI and installer API must remain usable on a clean install.
