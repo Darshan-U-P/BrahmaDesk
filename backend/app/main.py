@@ -581,13 +581,13 @@ def _engine_v1_mode() -> str:
     return mode if mode in {"auto", "cpu", "hybrid", "gpu"} else "auto"
 
 
-async def start_engine_v1() -> None:
-    """Start a server-owned supervisor, unless a standard server is already available."""
+async def start_engine_v1(*, force_owned: bool = False) -> None:
+    """Start a server-owned supervisor, unless an external server should be reused."""
     global engine_v1_supervisor, LLAMA_BASE_URL
     if EngineSupervisor is None or LlamaCppServerBackend is None or EngineSettings is None:
         raise RuntimeError("llama.cpp server adapter modules are unavailable in this installation")
 
-    if await llama_is_ready():
+    if not force_owned and await llama_is_ready():
         # Do not attach EngineSupervisor to a server process it did not launch.
         print(
             f"[Brahma Desk] Reusing existing llama.cpp HTTP endpoint at {LLAMA_BASE_URL}.",
@@ -1614,47 +1614,67 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     if not config or config.get("model_id") != model_id:
         raise HTTPException(status_code=409, detail="Configure this model before activation")
 
-    async with shutdown_lock:
-        server_ready = await llama_is_ready()
-        if server_ready and not llama_process_owned:
-            # The configured port belongs to an external process. Leave it
-            # untouched and start Brahma Desk's own server on another port.
-            # Persist the new endpoint so chat does not reconnect to the
-            # external server after the application is restarted.
+    if ENGINE_V1_ENABLED:
+        global engine_v1_supervisor
+        # Engine v1 owns its process through the supervisor, separate from the
+        # legacy process variables below. Never stop a process we did not create.
+        if engine_v1_supervisor is not None:
             try:
-                LLAMA_PORT = _find_available_llama_port()
-                LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
-                _persist_llama_endpoint(LLAMA_PORT)
-                server_ready = await llama_is_ready()
-            except OSError as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Could not allocate a separate local llama.cpp port: {exc}",
-                ) from exc
+                await engine_v1_supervisor.stop()
+            finally:
+                engine_v1_supervisor = None
 
-        if llama_process_owned and llama_process is not None:
-            same_model = Path(LLAMA_MODEL_PATH).resolve() == model_path.resolve()
-            same_config = (
-                LLAMA_CONTEXT_SIZE == int(config["context_size"])
-                and str(LLAMA_GPU_LAYERS) == str(config["gpu_layers"])
-            )
-            if not (server_ready and same_model and same_config):
-                stop_owned_llama()
-
-        LLAMA_MODEL_PATH = str(model_path)
+        LLAMA_MODEL_PATH = str(model_path.resolve())
         LLAMA_CONTEXT_SIZE = int(config["context_size"])
         LLAMA_THREADS = int(config["threads"])
         LLAMA_GPU_LAYERS = str(config["gpu_layers"])
         MODEL_ID = model_id
+        try:
+            await start_engine_v1(force_owned=True)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not start the selected model with llama.cpp: {exc}",
+            ) from exc
+    else:
+        async with shutdown_lock:
+            server_ready = await llama_is_ready()
+            if server_ready and not llama_process_owned:
+                # The configured port belongs to an external process. Leave it
+                # untouched and start Brahma Desk's own server on another port.
+                try:
+                    LLAMA_PORT = _find_available_llama_port()
+                    LLAMA_BASE_URL = f"http://{LLAMA_HOST}:{LLAMA_PORT}"
+                    _persist_llama_endpoint(LLAMA_PORT)
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Could not allocate a separate local llama.cpp port: {exc}",
+                    ) from exc
+
+            if llama_process_owned and llama_process is not None:
+                same_model = Path(LLAMA_MODEL_PATH).resolve() == model_path.resolve()
+                same_config = (
+                    LLAMA_CONTEXT_SIZE == int(config["context_size"])
+                    and str(LLAMA_GPU_LAYERS) == str(config["gpu_layers"])
+                )
+                if not (server_ready and same_model and same_config):
+                    stop_owned_llama()
+
+            LLAMA_MODEL_PATH = str(model_path.resolve())
+            LLAMA_CONTEXT_SIZE = int(config["context_size"])
+            LLAMA_THREADS = int(config["threads"])
+            LLAMA_GPU_LAYERS = str(config["gpu_layers"])
+            MODEL_ID = model_id
+
+            if not await llama_is_ready():
+                await start_llama_if_needed()
 
         if not await llama_is_ready():
-            await start_llama_if_needed()
-
-    if not await llama_is_ready():
-        raise HTTPException(
-            status_code=502,
-            detail=llama_start_error or "llama.cpp did not become ready with the selected model",
-        )
+            raise HTTPException(
+                status_code=502,
+                detail=llama_start_error or "llama.cpp did not become ready with the selected model",
+            )
 
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
