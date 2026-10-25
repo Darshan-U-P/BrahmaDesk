@@ -54,7 +54,7 @@
       {
         "from": "../backend/dist/brahma-backend.exe",
         "to": "backend/brahma-backend.exe"
-      },
+      }
     ],
     "win": {
       "target": [
