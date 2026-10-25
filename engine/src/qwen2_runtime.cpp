@@ -3,6 +3,7 @@
 #include "brahma/quantization.hpp"
 #include "brahma/tensor_ops.hpp"
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -113,6 +114,42 @@ void add_bias(std::vector<float>& values, std::span<const float> bias) {
     for (std::size_t i = 0; i < values.size(); ++i) values[i] += bias[i];
 }
 
+std::vector<float> quantized_linear_vector(std::span<const float> input,
+        const LoadedTensor& tensor, std::size_t output_width) {
+    const auto type = tensor.info.ggml_type;
+    const std::size_t block_values = 256;
+    const std::size_t block_bytes = type == 12 ? 144 : 210;
+    if ((type != 12 && type != 14) || input.empty() ||
+        input.size() % block_values != 0 ||
+        tensor.layout.elements != input.size() * output_width ||
+        tensor.payload.size() != (tensor.layout.elements / block_values) * block_bytes) {
+        throw std::runtime_error("Quantized projection shape or payload mismatch: " + tensor.info.name);
+    }
+    const std::size_t blocks_per_row = input.size() / block_values;
+    std::vector<float> output(output_width, 0.0f);
+#ifdef BRAHMA_ENGINE_USE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (std::int64_t row_i = 0; row_i < static_cast<std::int64_t>(output_width); ++row_i) {
+        const auto row = static_cast<std::size_t>(row_i);
+        float sum = 0.0f;
+        std::array<float, 256> decoded{};
+        for (std::size_t b = 0; b < blocks_per_row; ++b) {
+            const auto block_index = row * blocks_per_row + b;
+            const auto* p = tensor.payload.data() + block_index * block_bytes;
+            if (type == 12)
+                dequantize_q4_k_block(std::span<const std::uint8_t, 144>(p, 144), decoded);
+            else
+                dequantize_q6_k_block(std::span<const std::uint8_t, 210>(p, 210), decoded);
+            const auto input_offset = b * block_values;
+            for (std::size_t j = 0; j < block_values; ++j)
+                sum += decoded[j] * input[input_offset + j];
+        }
+        output[row] = sum;
+    }
+    return output;
+}
+
 std::vector<float> linear_vector(std::span<const float> input, std::span<const float> weight,
                                  std::size_t output_width) {
     if (input.empty() || output_width == 0 || weight.size() != input.size() * output_width)
@@ -151,6 +188,7 @@ struct Qwen2Runtime::Impl {
     TensorRegistry registry;
     Qwen2ModelConfig cfg;
     Qwen2Tokenizer tokenizer;
+    std::unordered_map<std::string, LoadedTensor> raw_tensors;
     std::unordered_map<std::string, std::vector<float>> weights;
     std::vector<std::vector<float>> key_cache;
     std::vector<std::vector<float>> value_cache;
@@ -166,12 +204,49 @@ struct Qwen2Runtime::Impl {
         value_cache.resize(static_cast<std::size_t>(cfg.block_count));
     }
 
+    const LoadedTensor& raw(const std::string& name) {
+        auto it = raw_tensors.find(name);
+        if (it != raw_tensors.end()) return it->second;
+        return raw_tensors.emplace(name, registry.load(name)).first->second;
+    }
+
     const std::vector<float>& get(const std::string& name) {
         auto it = weights.find(name);
         if (it != weights.end()) return it->second;
-        auto loaded = registry.load(name);
-        auto decoded = decode_tensor(loaded);
+        const auto& tensor = raw(name);
+        auto decoded = decode_tensor(tensor);
         return weights.emplace(name, std::move(decoded)).first->second;
+    }
+
+    std::vector<float> embedding_row(const std::string& name, std::size_t row,
+                                     std::size_t row_width) {
+        const auto& tensor = raw(name);
+        if (row_width == 0 || tensor.layout.elements % row_width != 0 ||
+            row >= tensor.layout.elements / row_width)
+            throw std::runtime_error("Embedding row shape mismatch: " + name);
+        const auto type = tensor.info.ggml_type;
+        if (type == 12 || type == 14) {
+            constexpr std::size_t block_values = 256;
+            const std::size_t block_bytes = type == 12 ? 144 : 210;
+            if (row_width % block_values != 0)
+                throw std::runtime_error("Quantized embedding row is not block-aligned: " + name);
+            const auto blocks_per_row = row_width / block_values;
+            std::vector<float> result(row_width);
+            std::array<float, 256> decoded{};
+            for (std::size_t b = 0; b < blocks_per_row; ++b) {
+                const auto block_index = row * blocks_per_row + b;
+                const auto* p = tensor.payload.data() + block_index * block_bytes;
+                if (type == 12)
+                    dequantize_q4_k_block(std::span<const std::uint8_t, 144>(p, 144), decoded);
+                else
+                    dequantize_q6_k_block(std::span<const std::uint8_t, 210>(p, 210), decoded);
+                std::copy(decoded.begin(), decoded.end(), result.begin() + static_cast<std::ptrdiff_t>(b * block_values));
+            }
+            return result;
+        }
+        const auto& all = get(name);
+        const auto begin = all.begin() + static_cast<std::ptrdiff_t>(row * row_width);
+        return std::vector<float>(begin, begin + static_cast<std::ptrdiff_t>(row_width));
     }
 
     std::vector<float> norm(std::span<const float> input, const std::string& name) {
@@ -183,6 +258,9 @@ struct Qwen2Runtime::Impl {
 
     std::vector<float> project(std::span<const float> input, const std::string& name,
                                std::size_t output_width) {
+        const auto& tensor = raw(name);
+        if (tensor.info.ggml_type == 12 || tensor.info.ggml_type == 14)
+            return quantized_linear_vector(input, tensor, output_width);
         return linear_vector(input, get(name), output_width);
     }
 
@@ -195,11 +273,10 @@ struct Qwen2Runtime::Impl {
         const auto kv_width = kv_heads * dim;
         if (token >= cfg.vocabulary_size) throw std::runtime_error("Token ID is outside the model vocabulary");
 
-        const auto& embedding = get("token_embd.weight");
-        if (embedding.size() != static_cast<std::size_t>(cfg.vocabulary_size) * hidden)
+        const auto& embedding_tensor = raw("token_embd.weight");
+        if (embedding_tensor.layout.elements != static_cast<std::size_t>(cfg.vocabulary_size) * hidden)
             throw std::runtime_error("Token embedding shape mismatch");
-        std::vector<float> x(embedding.begin() + static_cast<std::ptrdiff_t>(static_cast<std::size_t>(token) * hidden),
-                             embedding.begin() + static_cast<std::ptrdiff_t>((static_cast<std::size_t>(token) + 1) * hidden));
+        std::vector<float> x = embedding_row("token_embd.weight", static_cast<std::size_t>(token), hidden);
 
         for (std::size_t layer = 0; layer < static_cast<std::size_t>(cfg.block_count); ++layer) {
             const auto p = "blk." + std::to_string(layer) + ".";
