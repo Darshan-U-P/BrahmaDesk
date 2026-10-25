@@ -70,7 +70,8 @@ void rope_f32(
     std::size_t sequence_length,
     std::size_t head_dim,
     std::size_t position_offset,
-    float theta,\n    RopeLayout layout) {
+    float theta,
+    RopeLayout layout) {
     const auto total = checked_product(sequence_length, head_dim, "RoPE shape overflow");
     if (head_dim == 0 || head_dim % 2 != 0 || values.size() != total) {
         throw std::invalid_argument("RoPE requires an even head dimension and matching input size");
