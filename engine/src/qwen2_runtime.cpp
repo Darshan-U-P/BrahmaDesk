@@ -244,8 +244,8 @@ std::uint32_t Qwen2Runtime::greedy_next_token(std::span<const std::uint32_t> tok
 std::string Qwen2Runtime::generate(const std::string& prompt, std::size_t max_new_tokens) {
     if (max_new_tokens == 0) return {};
     const std::string formatted =
-        "<|im_start|>system\\nYou are a helpful assistant.<|im_end|>\\n"
-        "<|im_start|>user\\n" + prompt + "<|im_end|>\\n<|im_start|>assistant\\n";
+        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
+        "<|im_start|>user\n" + prompt + "<|im_end|>\n<|im_start|>assistant\n";
     auto ids = impl_->tokenizer.encode(formatted);
     for (auto& cache : impl_->key_cache) cache.clear();
     for (auto& cache : impl_->value_cache) cache.clear();
