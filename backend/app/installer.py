@@ -775,6 +775,20 @@ async def get_inference_configuration() -> dict[str, Any]:
         row = db.execute("SELECT value_json FROM installer_settings WHERE key='inference'").fetchone()
     return {"config": json.loads(row[0]) if row else None}
 
+async def _run_runtime_smoke_test(model_id: str) -> dict[str, Any]:
+    """Use the existing app-owned lifecycle for a real generation smoke test.
+
+    The installer must not launch a second server itself: main.activate_installer_model
+    owns process selection, loopback-port isolation, and shutdown ownership checks.
+    This compatibility bridge can later be replaced by an EngineSupervisor backend.
+    """
+    if __package__:
+        from . import main as runtime_service
+    else:
+        import main as runtime_service
+    return await runtime_service.activate_installer_model(model_id)
+
+
 @router.post("/test/{model_id}")
 async def test_model_readiness(model_id: str) -> dict[str, Any]:
     registered = _registry_rows().get(model_id)
@@ -784,19 +798,22 @@ async def test_model_readiness(model_id: str) -> dict[str, Any]:
     chosen = config.get("config")
     if not chosen or chosen.get("model_id") != model_id:
         raise HTTPException(status_code=409, detail="Configure this model before testing readiness")
-    # Do not launch a second llama-server or change the user's active server from
-    # this installer route. Verify GGUF and configuration; actual inference test
-    # can be run through the existing backend model lifecycle.
     path = Path(registered["path"])
     if not path.is_file() or path.stat().st_size != registered["size_bytes"]:
         raise HTTPException(status_code=422, detail="Model file changed since validation")
+
+    # Do not report readiness from file checks alone. Exercise the configured
+    # runtime and require a non-empty generated response before returning success.
+    activation = await _run_runtime_smoke_test(model_id)
     return {
-        "status": "ready_for_runtime_test",
+        "status": "ready",
         "model_id": model_id,
         "file_validation": "passed",
         "configuration_validation": "passed",
-        "runtime_inference_test": "not_run",
-        "message": "File and configuration checks passed. Start llama.cpp with this configuration and complete a generation test before release.",
+        "runtime_inference_test": activation.get("generation_test", "failed"),
+        "runtime": activation.get("runtime", "unknown"),
+        "sample_output": activation.get("sample_output", ""),
+        "message": "Model generated a non-empty response successfully.",
     }
 
 @router.get("/status")
