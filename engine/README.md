@@ -57,3 +57,8 @@ The current runtime is CPU-only. The next major performance step is a native SIM
 
 - [llama.cpp Qwen2 architecture graph](https://github.com/ggml-org/llama.cpp/blob/master/src/models/qwen2.cpp) — behavioral reference only.
 - [GGUF format definition](https://github.com/ggml-org/llama.cpp/blob/master/ggml/include/gguf.h) — file-format reference only.
+
+
+## Correctness and profiling
+
+See [Correctness and profiling baseline](docs/CORRECTNESS_AND_PROFILING.md) for tokenizer-ID comparison, logit export, repeatable benchmark commands, operator timing definitions, and OpenMP verification.
