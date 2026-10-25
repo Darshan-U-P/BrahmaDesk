@@ -136,9 +136,12 @@ class LlamaCppServerBackend:
             probe.bind((host, 0))
             return int(probe.getsockname()[1])
 
-    def _build_command(self, model: ModelArtifact, settings: EngineSettings) -> list[str]:
+    def _build_command(
+        self, model: ModelArtifact, settings: EngineSettings, *, port: int | None = None
+    ) -> list[str]:
         """Build the standard llama-server command for the selected local model."""
-        port = self._available_port(self._host)
+        if port is None:
+            port = self._available_port(self._host)
         if settings.mode == "cpu":
             gpu_layers = 0
         elif settings.gpu_layers is not None:
@@ -173,7 +176,8 @@ class LlamaCppServerBackend:
                 {"executable": str(self._executable)},
             )
 
-        command = self._build_command(model, settings)
+        port = self._available_port(self._host)
+        command = self._build_command(model, settings, port=port)
         # Run from the binary directory so Windows resolves CUDA/GGML DLLs
         # distributed alongside llama-server.exe.
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
