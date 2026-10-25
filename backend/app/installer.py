@@ -775,13 +775,68 @@ async def get_inference_configuration() -> dict[str, Any]:
         row = db.execute("SELECT value_json FROM installer_settings WHERE key='inference'").fetchone()
     return {"config": json.loads(row[0]) if row else None}
 
-async def _run_runtime_smoke_test(model_id: str) -> dict[str, Any]:
-    """Use the existing app-owned lifecycle for a real generation smoke test.
+async def _run_engine_v1_smoke_test(model_id: str) -> dict[str, Any]:
+    """Run the opt-in Engine v1 probe without changing the production chat runtime."""
+    registered = _registry_rows().get(model_id)
+    if not registered or not registered.get("verified"):
+        raise HTTPException(status_code=409, detail="Model must be registered and verified before Engine v1 testing")
+    config_result = await get_inference_configuration()
+    config = config_result.get("config")
+    if not isinstance(config, dict) or config.get("model_id") != model_id:
+        raise HTTPException(status_code=409, detail="Configure this model before Engine v1 testing")
 
-    The installer must not launch a second server itself: main.activate_installer_model
-    owns process selection, loopback-port isolation, and shutdown ownership checks.
-    This compatibility bridge can later be replaced by an EngineSupervisor backend.
+    executable = os.getenv("BRAHMA_LLAMA_SERVER_EXE")
+    if not executable:
+        _registry_init()
+        with sqlite3.connect(REGISTRY_DB, timeout=10) as db:
+            row = db.execute("SELECT value_json FROM installer_settings WHERE key='runtime_executable'").fetchone()
+        if row:
+            try:
+                executable = json.loads(row[0]).get("path")
+            except (TypeError, ValueError, AttributeError):
+                executable = None
+    if not executable or not Path(executable).is_file():
+        raise HTTPException(
+            status_code=409,
+            detail="Engine v1 requires a configured llama-server.exe. Set BRAHMA_LLAMA_SERVER_EXE or configure the installer runtime.",
+        )
+
+    try:
+        from .engine.runtime_probe import probe_runtime
+    except ImportError:
+        from app.engine.runtime_probe import probe_runtime
+    result = await probe_runtime(
+        Path(executable),
+        Path(registered["path"]),
+        mode=str(config.get("mode", "auto")),
+        context_size=int(config.get("context_size", 4096)),
+        startup_timeout=float(os.getenv("BRAHMA_ENGINE_STARTUP_TIMEOUT", "180")),
+    )
+    if result.get("status") != "passed":
+        error = result.get("error") or {"message": "Engine v1 runtime smoke test failed"}
+        raise HTTPException(status_code=502, detail=error)
+    return {
+        "status": "activated",
+        "model_id": model_id,
+        "model_path": registered["path"],
+        "runtime": result.get("backend", "llama.cpp"),
+        "generation_test": result.get("generation_test", "failed"),
+        "sample_output": result.get("sample_output", ""),
+        "resource_plan": result.get("resource_plan", {}),
+        "engine_v1": True,
+    }
+
+
+async def _run_runtime_smoke_test(model_id: str) -> dict[str, Any]:
+    """Select the legacy runtime by default; opt in to the isolated Engine v1 probe.
+
+    BRAHMA_ENGINE_V1_SMOKE_TEST=1 runs a temporary EngineSupervisor-owned server
+    for installer readiness testing. It never replaces the app's active chat
+    runtime, and it stops only the process created by that probe. Leave the flag
+    unset to preserve the existing production activation path.
     """
+    if os.getenv("BRAHMA_ENGINE_V1_SMOKE_TEST", "").strip().casefold() in {"1", "true", "yes", "on"}:
+        return await _run_engine_v1_smoke_test(model_id)
     if __package__:
         from . import main as runtime_service
     else:
