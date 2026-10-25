@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Cpu, Download, HardDrive, RefreshCw, ShieldCheck, Sparkles, XCircle } from "lucide-react";
 import "./installer.css";
 
@@ -48,10 +48,12 @@ export default function InstallerWizard() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<"scan" | "select" | "download" | "configure" | "complete">("scan");
+  const autoDownloadStarted = useRef(false);
 
   const refresh = useCallback(async () => {
     setError("");
     try {
+      await api("/api/installer/scan-local", { method: "POST" }).catch(() => undefined);
       const [catalog, downloads, runtimeStatus] = await Promise.all([
         api<{ hardware: Hardware; models: Model[] }>("/api/installer/catalog"),
         api<{ jobs: Job[] }>("/api/installer/downloads"),
@@ -61,7 +63,7 @@ export default function InstallerWizard() {
       setModels(catalog.models);
       setJobs(downloads.jobs);
       setRuntime(runtimeStatus);
-      setSelected(current => current || catalog.models.find(m => m.recommendation === "recommended")?.id || catalog.models[0]?.id || "");
+      setSelected(current => current || catalog.models.find(m => m.installed)?.id || catalog.models.find(m => m.recommendation === "recommended")?.id || catalog.models[0]?.id || "");
       setStep(current => current === "scan" ? "select" : current);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load installer data.");
@@ -150,6 +152,20 @@ export default function InstallerWizard() {
     finally { setBusy(false); }
   }
 
+  // Automatically download a recommended model on first run only when no local
+  // model was discovered. Runtime detection must succeed first.
+  useEffect(() => {
+    if (!runtime?.exists || models.length === 0 || models.some(model => model.installed) || autoDownloadStarted.current) return;
+    const candidate = models.find(model => model.recommendation === "recommended") || models.find(model => model.recommendation === "compatible_with_constraints") || models.find(model => model.recommendation !== "unsupported");
+    if (!candidate) return;
+    autoDownloadStarted.current = true;
+    setSelected(candidate.id);
+    setStep("download");
+    setNotice("First-run setup: downloading " + candidate.name + " automatically. Progress is shown below.");
+    void api<Job>("/api/installer/downloads", { method: "POST", body: JSON.stringify({ model_id: candidate.id }) })
+      .then(() => refresh())
+      .catch(e => setError(e instanceof Error ? e.message : "Automatic model download could not start."));
+  }, [models, runtime, refresh]);
   return <div className="installer-page">
     <div className="installer-hero">
       <div className="installer-icon"><Sparkles size={23}/></div>
