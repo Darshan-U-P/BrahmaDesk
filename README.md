@@ -15,9 +15,9 @@ The project is designed for a single machine. It does not currently provide clou
 - Retrieves relevant active memories, available project context, and earlier conversation messages within a bounded context budget.
 - Exposes model sampling controls and reasoning preferences in the desktop interface.
 - Includes a user-controlled Update Center for checking, downloading, and installing packaged releases.
-- Packages the desktop application and FastAPI backend into a Windows x64 MSI installer.
+- Packages the desktop application, FastAPI backend, and a staged llama.cpp runtime into a Windows x64 MSI installer.
 
-The standard llama.cpp runtime is staged into packaged MSI resources from a local Windows distribution at build time. The GGUF model is downloaded during first-run setup and is not embedded in the MSI. Packaged builds use the llama.cpp runtime bundled into the MSI. Source development can set `LLAMA_SERVER_EXE` to a local compatible executable. Brahma Desk launches the standard llama.cpp server and uses its OpenAI-compatible API; `BRAHMA_ENGINE_V1_ENABLED=0` temporarily switches to the previous server process manager for rollback/testing.
+The llama.cpp runtime is staged into packaged MSI resources from a local Windows distribution at build time. The GGUF model is not embedded in the MSI; first-run setup can discover an existing model or download the recommended model. Packaged builds prefer the bundled runtime. Source development can set `LLAMA_SERVER_EXE` to a compatible executable. Brahma Desk launches the standard llama.cpp server and uses its OpenAI-compatible API.
 
 ## Project Layout
 
@@ -240,7 +240,7 @@ npm run dist:win
 
 The installer and update metadata are generated under `desktop\release\`. The MSI targets Windows x64 and is configured to preserve user data during standard upgrades.
 
-The MSI bundles the staged llama.cpp runtime, including `llama-server.exe` and its adjacent DLLs, but not the multi-gigabyte GGUF model. The first launch immediately after installation offers Standard installation, Clean installation, or Cancel setup before the backend starts. Standard installation preserves user data. Clean installation asks for confirmation, deletes only `%APPDATA%\\brahma-desk` (including conversations, profiles, settings, memories, registry/configuration, and managed downloaded models), and makes the first model scan ignore unrelated local GGUF files so the recommended model is downloaded fresh. GGUF files outside Brahma Desk's managed data directory are not deleted.
+The MSI bundles the staged llama.cpp runtime, including `llama-server.exe` and its adjacent DLLs, but not the multi-gigabyte GGUF model. The packaged app is intended to offer Standard installation, Clean installation, or Cancel setup before the backend starts. Standard installation preserves user data. Clean installation asks for confirmation and removes Brahma Desk's managed user-data directory, including conversations, profiles, settings, memories, configuration, and managed downloaded models. It then starts fresh model setup rather than reusing GGUF files discovered in unrelated folders. GGUF files outside Brahma Desk's managed data directory are not deleted. Verify this flow on the actual packaged MSI before distributing it.
 
 ### Releases and Updates
 
@@ -320,9 +320,9 @@ Roadmap priorities may change as development progresses. Planned features will b
 
 Bug reports, feature suggestions, and improvement ideas are welcome. When reporting a problem, include the Brahma Desk version, relevant logs, operating system details, and steps to reproduce the issue. Do not include API credentials, private keys, certificate passwords, or other secrets.
 
-## v0.2.0 release milestone
+## Historical packaging notes
 
-Brahma Desk's custom lotus/atomic logo source is maintained at `desktop/build/logo.svg`, with branded installer artwork source at `desktop/build/installer-artwork.svg`. Windows packaging is configured to use `desktop/build/icon.ico`. The MSI provides Start Menu and desktop shortcuts and launches Brahma Desk after setup. The app then offers a one-time installation-mode choice for that version.
+Brahma Desk's custom lotus/atomic logo source is maintained at `desktop/build/logo.svg`, with branded installer artwork source at `desktop/build/installer-artwork.svg`. Windows packaging is configured to use `desktop/build/icon.ico`. The MSI provides Start Menu and desktop shortcuts and launches Brahma Desk after setup. The app is intended to offer a one-time installation-mode choice for that version; verify this in a packaged build before release.
 
 Before publishing a production installer, validate on Windows: clean install, upgrade from v0.1.2, profile persistence, existing GGUF discovery, model download cancellation/retry/integrity verification, updater download/install/restart, and uninstall data-preservation behavior. Do not mark the release verified until those tests pass on a built installer.
 ## Windows MSI build (0.3.0)
@@ -355,6 +355,7 @@ Validate both modes on a Windows test account before publishing: standard upgrad
 
 - Removed the LOCAL-FIRST sidebar banner from the desktop interface.
 - Bundles the selected llama.cpp runtime in the Windows x64 MSI.
-- Builds the FastAPI backend executable as part of the Windows packaging command.
+- Rebuilds the FastAPI backend executable as part of the Windows packaging command.
 - Keeps local inference, model setup, and existing workspace navigation available.
-- The MSI is built locally using `LLAMA_CPP_RUNTIME_DIR`; do not commit runtime binaries to Git.
+- The MSI is built locally using `LLAMA_CPP_RUNTIME_DIR`; runtime binaries are not committed to Git.
+- The published GitHub release and tag must be checked against the intended source commit before treating this release as a verified source release.
