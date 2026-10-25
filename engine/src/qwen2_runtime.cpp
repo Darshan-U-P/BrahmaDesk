@@ -6,6 +6,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -190,6 +191,7 @@ struct Qwen2Runtime::Impl {
     std::unordered_map<std::string, std::vector<float>> weights;
     std::vector<std::vector<float>> key_cache;
     std::vector<std::vector<float>> value_cache;
+    GenerationStats last_stats;
 
     explicit Impl(const std::filesystem::path& p)
         : path(p), registry(GgufReader::inspect(p), p), cfg(validate_qwen2_schema(registry.model())), tokenizer(registry.model()) {
@@ -349,6 +351,7 @@ Qwen2Runtime& Qwen2Runtime::operator=(Qwen2Runtime&&) noexcept = default;
 Qwen2Runtime::~Qwen2Runtime() = default;
 
 const Qwen2ModelConfig& Qwen2Runtime::config() const noexcept { return impl_->cfg; }
+const GenerationStats& Qwen2Runtime::last_generation_stats() const noexcept { return impl_->last_stats; }
 
 std::vector<float> Qwen2Runtime::logits(std::span<const std::uint32_t> token_ids) {
     if (token_ids.empty()) throw std::invalid_argument("At least one prompt token ID is required");
@@ -367,17 +370,24 @@ std::uint32_t Qwen2Runtime::greedy_next_token(std::span<const std::uint32_t> tok
 }
 
 std::string Qwen2Runtime::generate(const std::string& prompt, std::size_t max_new_tokens) {
+    impl_->last_stats = {};
     if (max_new_tokens == 0) return {};
     const std::string formatted =
         "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
         "<|im_start|>user\n" + prompt + "<|im_end|>\n<|im_start|>assistant\n";
     auto ids = impl_->tokenizer.encode(formatted);
+    impl_->last_stats.prompt_tokens = ids.size();
     for (auto& cache : impl_->key_cache) cache.clear();
     for (auto& cache : impl_->value_cache) cache.clear();
     std::vector<float> current_logits;
+    const auto prefill_start = std::chrono::steady_clock::now();
     for (std::size_t i = 0; i < ids.size(); ++i) current_logits = impl_->step(ids[i], i);
+    const auto prefill_end = std::chrono::steady_clock::now();
+    impl_->last_stats.prefill_seconds =
+        std::chrono::duration<double>(prefill_end - prefill_start).count();
     std::vector<std::uint32_t> generated;
     generated.reserve(max_new_tokens);
+    const auto decode_start = std::chrono::steady_clock::now();
     for (std::size_t i = 0; i < max_new_tokens; ++i) {
         const auto it = std::max_element(current_logits.begin(), current_logits.end());
         if (it == current_logits.end()) throw std::runtime_error("Model returned empty logits");
@@ -387,6 +397,10 @@ std::string Qwen2Runtime::generate(const std::string& prompt, std::size_t max_ne
         generated.push_back(next);
         if (i + 1 < max_new_tokens) current_logits = impl_->step(next, ids.size() - 1);
     }
+    const auto decode_end = std::chrono::steady_clock::now();
+    impl_->last_stats.generated_tokens = generated.size();
+    impl_->last_stats.decode_seconds =
+        std::chrono::duration<double>(decode_end - decode_start).count();
     return impl_->tokenizer.decode(generated, true);
 }
 
