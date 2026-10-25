@@ -643,15 +643,14 @@ async def lifespan(_: FastAPI):
             try:
                 await engine_v1_supervisor.stop()
             except Exception as exc:
-                print(f"[Brahma Desk] Engine v1 shutdown error: {exc}", flush=True)
+                print(f"[Brahma Desk] Engine server shutdown error: {exc}", flush=True)
             finally:
                 engine_v1_supervisor = None
-        else:
-            async with shutdown_lock:
-                try:
-                    stop_owned_llama()
-                except (OSError, subprocess.SubprocessError) as exc:
-                    print(f"[Brahma Desk] Model shutdown error: {exc}", flush=True)
+        async with shutdown_lock:
+            try:
+                stop_owned_llama()
+            except (OSError, subprocess.SubprocessError) as exc:
+                print(f"[Brahma Desk] Legacy model shutdown error: {exc}", flush=True)
 
 
 app = FastAPI(
