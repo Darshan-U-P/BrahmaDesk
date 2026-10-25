@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from app.engine.contracts import EngineError, EngineErrorCode, EngineSettings
+from app.engine.contracts import (
+    EngineError,
+    EngineErrorCode,
+    EngineSettings,
+    GenerationRequest,
+)
 from app.engine.llama_cpp_backend import LlamaCppServerBackend
 
 
@@ -81,8 +86,6 @@ def test_stop_does_not_touch_process_when_none_is_owned(tmp_path: Path) -> None:
 def test_generate_uses_full_messages_and_streams_chunks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import json
-
     backend = LlamaCppServerBackend(tmp_path / "llama-server.exe")
     backend._base_url = "http://127.0.0.1:12345"
     backend._model = type("Model", (), {"model_id": "test-model"})()
@@ -134,7 +137,7 @@ def test_generate_uses_full_messages_and_streams_chunks(
     async def collect():
         chunks = []
         async for chunk in backend.generate(
-            __import__("app.engine.contracts", fromlist=["GenerationRequest"]).GenerationRequest(
+            GenerationRequest(
                 prompt="Hello",
                 messages=[
                     {"role": "system", "content": "Be concise."},
