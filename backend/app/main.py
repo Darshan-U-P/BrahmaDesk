@@ -252,8 +252,8 @@ LLAMA_LOAD_MODE = os.getenv("LLAMA_LOAD_MODE", "auto")
 LLAMA_STARTUP_TIMEOUT = float(os.getenv("LLAMA_STARTUP_TIMEOUT", "180"))
 MODEL_ID = os.getenv("LLAMA_MODEL_ID", "local-model")
 
-# Opt-in only until Engine v1 has been verified in the local desktop workflow.
-ENGINE_V1_ENABLED = os.getenv("BRAHMA_ENGINE_V1_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+# Use the persistent, owned llama.cpp server adapter by default. Set BRAHMA_ENGINE_V1_ENABLED=0 to roll back to the legacy server path during testing.
+ENGINE_V1_ENABLED = os.getenv("BRAHMA_ENGINE_V1_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
 engine_v1_supervisor = None
 
 # Electron generates a random token and passes it to this backend.
