@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.engine.brahma_native_backend import BrahmaNativeBackend
-from app.engine.contracts import EngineSettings, GenerationRequest
+from app.engine.contracts import EngineError, EngineErrorCode, EngineSettings, GenerationRequest
 
 
 def make_gguf(path: Path) -> Path:
@@ -14,32 +14,32 @@ def make_gguf(path: Path) -> Path:
     return path
 
 
-@pytest.mark.asyncio
-async def test_inspect_model_rejects_missing_file(tmp_path: Path) -> None:
+def test_inspect_model_rejects_missing_file(tmp_path: Path) -> None:
     backend = BrahmaNativeBackend(tmp_path / "brahma-engine.exe")
 
-    with pytest.raises(Exception, match="does not exist"):
-        await backend.inspect_model(tmp_path / "missing.gguf")
+    with pytest.raises(EngineError) as error:
+        asyncio.run(backend.inspect_model(tmp_path / "missing.gguf"))
+    assert error.value.code == EngineErrorCode.MODEL_NOT_FOUND
 
 
-@pytest.mark.asyncio
-async def test_inspect_model_rejects_invalid_gguf_header(tmp_path: Path) -> None:
+def test_inspect_model_rejects_invalid_gguf_header(tmp_path: Path) -> None:
     model = tmp_path / "bad.gguf"
     model.write_bytes(b"NOPE" + b"\x00" * 32)
     backend = BrahmaNativeBackend(tmp_path / "brahma-engine.exe")
 
-    with pytest.raises(Exception, match="GGUF magic header"):
-        await backend.inspect_model(model)
+    with pytest.raises(EngineError) as error:
+        asyncio.run(backend.inspect_model(model))
+    assert error.value.code == EngineErrorCode.MODEL_INVALID_GGUF
 
 
-@pytest.mark.asyncio
-async def test_start_requires_native_executable(tmp_path: Path) -> None:
+def test_start_requires_native_executable(tmp_path: Path) -> None:
     model = make_gguf(tmp_path / "model.gguf")
     backend = BrahmaNativeBackend(tmp_path / "missing-engine.exe")
-    artifact = await backend.inspect_model(model)
+    artifact = asyncio.run(backend.inspect_model(model))
 
-    with pytest.raises(Exception, match="could not find brahma-engine.exe"):
-        await backend.plan(artifact, EngineSettings())
+    with pytest.raises(EngineError) as error:
+        asyncio.run(backend.plan(artifact, EngineSettings()))
+    assert error.value.code == EngineErrorCode.RUNTIME_NOT_INSTALLED
 
 
 class FakeStream:
@@ -70,19 +70,18 @@ class FakeProcess:
         self.returncode = -9
 
 
-@pytest.mark.asyncio
-async def test_generate_streams_only_response_not_cli_banner(
+def test_generate_streams_only_response_not_cli_banner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     executable = tmp_path / "brahma-engine.exe"
     executable.write_bytes(b"placeholder")
     model_path = make_gguf(tmp_path / "model.gguf")
     backend = BrahmaNativeBackend(executable)
-    artifact = await backend.inspect_model(model_path)
-    await backend.start(
+    artifact = asyncio.run(backend.inspect_model(model_path))
+    asyncio.run(backend.start(
         artifact,
         EngineSettings(context_size=2048, mode="cpu", threads=2, gpu_layers=0),
-    )
+    ))
 
     fake_process = FakeProcess()
     captured: dict[str, object] = {}
@@ -98,18 +97,21 @@ async def test_generate_streams_only_response_not_cli_banner(
         fake_create_subprocess_exec,
     )
 
-    chunks = [
-        chunk
-        async for chunk in backend.generate(
-            GenerationRequest(
-                prompt="Say hello",
-                max_tokens=16,
-                temperature=0.0,
-                messages=[{"role": "user", "content": "Say hello"}],
-                stream=True,
+    async def collect_chunks():
+        return [
+            chunk
+            async for chunk in backend.generate(
+                GenerationRequest(
+                    prompt="Say hello",
+                    max_tokens=16,
+                    temperature=0.0,
+                    messages=[{"role": "user", "content": "Say hello"}],
+                    stream=True,
+                )
             )
-        )
-    ]
+        ]
+
+    chunks = asyncio.run(collect_chunks())
 
     assert "".join(chunk.text for chunk in chunks) == "Hello world!"
     assert chunks[-1].finished is True
