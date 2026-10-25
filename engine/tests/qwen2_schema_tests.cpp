@@ -37,6 +37,6 @@ int main(){
   auto wrong=m; wrong.tensors[2].dimensions={5};
   try{(void)brahma::validate_qwen2_schema(wrong);}catch(const std::exception&){rejected=true;}
   req(rejected,"wrong tensor shape rejection");
-  std::cout<<"Qwen2 schema tests passed\\n"; return 0;
- } catch(const std::exception& e) { std::cerr<<e.what()<<'\\n'; return 1; }
+  std::cout<<"Qwen2 schema tests passed\n"; return 0;
+ } catch(const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
 }
