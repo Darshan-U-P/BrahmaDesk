@@ -1,5 +1,7 @@
 #include "brahma/gguf_reader.hpp"
 #include "brahma/tensor_validator.hpp"
+#include "brahma/quantization.hpp"
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -32,6 +34,20 @@ int main(){
   try{brahma::TensorInfo bad{"unknown",{32},999,0};(void)brahma::tensor_layout(bad,m.tensor_data_offset,m.tensor_data_offset+4096);}
   catch(const std::exception&){rejected=true;}
   req(rejected,"unknown type rejection");
+  std::array<std::uint8_t,144> q4_block{};
+  q4_block[0]=0x00;q4_block[1]=0x3c; // fp16 d = 1.0
+  for(std::size_t i=4;i<8;++i)q4_block[i]=1;
+  for(std::size_t i=8;i<12;++i)q4_block[i]=1;
+  for(std::size_t i=16;i<144;++i)q4_block[i]=0x11;
+  std::array<float,256> decoded{};
+  brahma::dequantize_q4_k_block(q4_block,decoded);
+  for(const auto v:decoded)req(v==1.0f,"Q4_K known-value dequantization");
+  std::vector<std::uint8_t> q4_payload(q4_block.begin(),q4_block.end());
+  const auto decoded_vector=brahma::dequantize_q4_k(q4_payload,256);
+  req(decoded_vector.size()==256&&decoded_vector[255]==1.0f,"Q4_K tensor dequantization");
+  rejected=false;
+  try{(void)brahma::dequantize_q4_k(q4_payload,255);}catch(const std::exception&){rejected=true;}
+  req(rejected,"Q4_K invalid element count rejection");
   std::filesystem::remove(p);std::cout<<"GGUF reader and tensor validator tests passed\n";return 0;
  }catch(const std::exception& e){std::filesystem::remove(p);std::cerr<<e.what()<<"\n";return 1;}
 }
