@@ -3,7 +3,6 @@
 #include "brahma/tensor_registry.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <span>
@@ -18,6 +17,9 @@ struct GenerationStats {
     std::size_t generated_tokens{};
     double prefill_seconds{};
     double decode_seconds{};
+    double projection_seconds{};
+    double normalization_seconds{};
+    double attention_seconds{};
 };
 
 // Native CPU Qwen2 inference runtime. Weights are decoded from GGUF directly;
@@ -34,6 +36,8 @@ public:
 
     [[nodiscard]] const Qwen2ModelConfig& config() const noexcept;
     [[nodiscard]] const GenerationStats& last_generation_stats() const noexcept;
+    [[nodiscard]] std::vector<std::uint32_t> tokenize(const std::string& text) const;
+    [[nodiscard]] static const char* parallel_backend() noexcept;
     // Replays the supplied token IDs from position zero and returns next-token logits.
     [[nodiscard]] std::vector<float> logits(std::span<const std::uint32_t> token_ids);
     [[nodiscard]] std::uint32_t greedy_next_token(std::span<const std::uint32_t> token_ids);
