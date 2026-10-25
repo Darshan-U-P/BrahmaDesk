@@ -1,5 +1,6 @@
 #include "brahma/tensor_loader.hpp"
-#include <array>\n#include <bit>
+#include <array>
+#include <bit>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
