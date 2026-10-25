@@ -28,6 +28,7 @@ The generation command is a first native CPU inference path for Qwen2.5-Instruct
 - [x] Named GGUF tensor loading, layout validation, and tensor registry.
 - [x] Payload bounds, alignment, overlap, and serialized-size checks for the tensor types listed in `tensor_validator.cpp`.
 - [x] Q4_K and Q6_K block dequantization.
+- [x] Fused Q4_K/Q6_K block dot products that avoid materializing temporary float blocks during quantized projections, with equivalence tests against dequantize-then-dot.
 - [x] CPU F32/F16, Q4_0/Q4_1, Q5_0/Q5_1, Q8_0, Q4_K and Q6_K tensor decoding for the initial inference path.
 - [x] CPU matrix-vector projections, RMSNorm, SwiGLU, NeoX RoPE, grouped-query causal attention, residual paths, and per-layer KV cache.
 - [x] Qwen2 schema validation for required tensors and metadata.
@@ -39,7 +40,18 @@ The generation command is a first native CPU inference path for Qwen2.5-Instruct
 
 This is an initial independent runtime, not yet a production-equivalent replacement for llama.cpp. The generation path currently decodes F32, F16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q4_K, and Q6_K tensors; it fails explicitly on other tensor types rather than silently interpreting them. The pre-tokenizer is a lightweight native approximation and has not yet been proven token-for-token identical to the official Qwen2 tokenizer. Quantization decoders and logits have not yet been compared numerically against a trusted independent runtime. No end-to-end generation run on the user's real Qwen2.5-3B file has been confirmed yet. Treat the first real-model run as a validation step, not a finished correctness claim.
 
-The current implementation is CPU-only and greedy. Linear projections use float accumulation and optional OpenMP row-parallel execution when CMake detects OpenMP. This is an initial optimization only: the runtime still expands quantized weights to float32 and can use substantial RAM. Native quantized matrix-vector kernels, sampling controls, robust context-window limits, GPU support, and Brahma Desk adapter integration remain future work.
+The current implementation is CPU-only and greedy. Linear projections use float accumulation and optional OpenMP row-parallel execution when CMake detects OpenMP. Q4_K/Q6_K projections now use fused block dot products without expanding each block into a temporary float array, and these kernels have synthetic equivalence tests. The runtime still keeps loaded quantized tensor payloads in host RAM; this is not yet memory-mapped SSD execution. GPU execution, CPU/GPU layer offload, automatic backend selection, robust context-window limits, and Brahma Desk adapter integration remain future work. Do not interpret the presence of these roadmap items as implemented hardware modes.
+
+## Hardware and weight-placement roadmap
+
+The execution design will separate **compute device** from **weight placement**:
+- CPU compute with quantized weights in system RAM (current backend).
+- GPU compute with quantized weights resident in VRAM (future CUDA backend).
+- Hybrid CPU/GPU layer offload with explicit VRAM budgets (future).
+- Memory-mapped GGUF weights backed by SSD and the OS page cache (future; not the same as repeatedly reading individual tensors from disk).
+- Automatic mode selection based on detected hardware and memory budgets (future).
+
+The current runtime is CPU-only. The next major performance step is a native SIMD quantized CPU kernel and then a real CUDA quantized backend; a CLI flag alone would not constitute GPU support.
 
 ## References
 
