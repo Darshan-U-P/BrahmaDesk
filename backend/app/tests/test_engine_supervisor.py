@@ -42,9 +42,10 @@ class FakeBackend:
         return ResourcePlan(selected_mode=settings.mode, context_size=settings.context_size)
 
     async def start(self, model: ModelArtifact, settings: EngineSettings) -> EngineHealth:
+        # Simulate a backend that creates an owned resource before startup fails.
+        self.started = True
         if self.fail_start:
             raise RuntimeError("simulated startup failure")
-        self.started = True
         return EngineHealth(
             state=EngineState.READY,
             backend=self.name,
@@ -95,6 +96,10 @@ def test_supervisor_start_generate_and_stop(tmp_path: Path) -> None:
         assert supervisor.state == EngineState.STOPPED
         assert backend.stopped
 
+        # Shutdown is idempotent and must not call into an already-stopped backend.
+        await supervisor.stop()
+        assert supervisor.state == EngineState.STOPPED
+
     asyncio.run(run())
 
 
@@ -119,6 +124,8 @@ def test_supervisor_reports_start_failure(tmp_path: Path) -> None:
 
         assert exc.value.code == EngineErrorCode.RUNTIME_START_FAILED
         assert supervisor.state == EngineState.FAILED
+        assert backend.stopped
+        assert backend.started is False
 
     asyncio.run(run())
 
