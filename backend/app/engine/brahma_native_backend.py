@@ -185,18 +185,18 @@ class BrahmaNativeBackend:
                     role = "user"
                 content = str(message.get("content", "")).strip()
                 if content:
-                    parts.append(f"<|im_start|>{role}\\n{content}<|im_end|>")
-            parts.append("<|im_start|>assistant\\n")
-            return "\\n".join(parts)
+                    parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
+            parts.append("<|im_start|>assistant\n")
+            return "\n".join(parts)
 
         parts = []
         for message in messages:
             role = str(message.get("role", "user")).strip().upper()
             content = str(message.get("content", "")).strip()
             if content:
-                parts.append(f"{role}:\\n{content}")
+                parts.append(f"{role}:\n{content}")
         parts.append("ASSISTANT:")
-        return "\\n\\n".join(parts)
+        return "\n\n".join(parts)
 
     async def generate(
         self, request: GenerationRequest
