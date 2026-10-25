@@ -1595,7 +1595,7 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     port and persist that endpoint for subsequent launches.
     """
     global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
-    global llama_process, llama_process_owned, llama_start_error
+    global llama_process, llama_process_owned, llama_start_error, engine_v1_supervisor
 
     if __package__:
         from . import installer as installer_service
