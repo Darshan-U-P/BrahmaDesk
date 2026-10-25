@@ -192,6 +192,9 @@ struct Qwen2Runtime::Impl {
     std::vector<std::vector<float>> key_cache;
     std::vector<std::vector<float>> value_cache;
     GenerationStats last_stats;
+    double projection_seconds{};
+    double normalization_seconds{};
+    double attention_seconds{};
 
     explicit Impl(const std::filesystem::path& p)
         : path(p), registry(GgufReader::inspect(p), p), cfg(validate_qwen2_schema(registry.model())), tokenizer(registry.model()) {
@@ -250,18 +253,23 @@ struct Qwen2Runtime::Impl {
     }
 
     std::vector<float> norm(std::span<const float> input, const std::string& name) {
+        const auto op_start = std::chrono::steady_clock::now();
         const auto& w = get(name);
         std::vector<float> out(input.size());
         rms_norm_f32(input, w, out, 1, input.size(), static_cast<float>(cfg.rms_norm_epsilon));
+        normalization_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - op_start).count();
         return out;
     }
 
     std::vector<float> project(std::span<const float> input, const std::string& name,
                                std::size_t output_width) {
+        const auto op_start = std::chrono::steady_clock::now();
         const auto& tensor = raw(name);
-        if (tensor.info.ggml_type == 12 || tensor.info.ggml_type == 14)
-            return quantized_linear_vector(input, tensor, output_width);
-        return linear_vector(input, get(name), output_width);
+        auto output = (tensor.info.ggml_type == 12 || tensor.info.ggml_type == 14)
+            ? quantized_linear_vector(input, tensor, output_width)
+            : linear_vector(input, get(name), output_width);
+        projection_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - op_start).count();
+        return output;
     }
 
     std::vector<float> step(std::uint32_t token, std::size_t position) {
@@ -299,6 +307,7 @@ struct Qwen2Runtime::Impl {
             if (kc.size() != context_tokens * kv_width || vc.size() != context_tokens * kv_width)
                 throw std::runtime_error("KV cache position mismatch");
 
+            const auto attention_start = std::chrono::steady_clock::now();
             std::vector<float> attended(hidden, 0.0f);
             const auto group_size = heads / kv_heads;
             const float scale = 1.0f / std::sqrt(static_cast<float>(dim));
@@ -322,6 +331,7 @@ struct Qwen2Runtime::Impl {
                     attended[h * dim + d] = static_cast<float>(sum / denom);
                 }
             }
+            attention_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - attention_start).count();
             auto attn_out = project(attended, p + "attn_output.weight", hidden);
             x.resize(hidden);
             for (std::size_t i = 0; i < hidden; ++i) x[i] = residual[i] + attn_out[i];
@@ -352,6 +362,14 @@ Qwen2Runtime::~Qwen2Runtime() = default;
 
 const Qwen2ModelConfig& Qwen2Runtime::config() const noexcept { return impl_->cfg; }
 const GenerationStats& Qwen2Runtime::last_generation_stats() const noexcept { return impl_->last_stats; }
+std::vector<std::uint32_t> Qwen2Runtime::tokenize(const std::string& text) const { return impl_->tokenizer.encode(text); }
+const char* Qwen2Runtime::parallel_backend() noexcept {
+#ifdef BRAHMA_ENGINE_USE_OPENMP
+    return "OpenMP";
+#else
+    return "serial (OpenMP not found by CMake)";
+#endif
+}
 
 std::vector<float> Qwen2Runtime::logits(std::span<const std::uint32_t> token_ids) {
     if (token_ids.empty()) throw std::invalid_argument("At least one prompt token ID is required");
@@ -371,6 +389,9 @@ std::uint32_t Qwen2Runtime::greedy_next_token(std::span<const std::uint32_t> tok
 
 std::string Qwen2Runtime::generate(const std::string& prompt, std::size_t max_new_tokens) {
     impl_->last_stats = {};
+    impl_->projection_seconds = 0.0;
+    impl_->normalization_seconds = 0.0;
+    impl_->attention_seconds = 0.0;
     if (max_new_tokens == 0) return {};
     const std::string formatted =
         "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n"
@@ -401,6 +422,9 @@ std::string Qwen2Runtime::generate(const std::string& prompt, std::size_t max_ne
     impl_->last_stats.generated_tokens = generated.size();
     impl_->last_stats.decode_seconds =
         std::chrono::duration<double>(decode_end - decode_start).count();
+    impl_->last_stats.projection_seconds = impl_->projection_seconds;
+    impl_->last_stats.normalization_seconds = impl_->normalization_seconds;
+    impl_->last_stats.attention_seconds = impl_->attention_seconds;
     return impl_->tokenizer.decode(generated, true);
 }
 
