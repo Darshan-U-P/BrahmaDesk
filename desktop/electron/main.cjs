@@ -534,15 +534,29 @@ async function chooseInstallationMode() {
       throw new Error("Refusing to clean an unexpected data directory: " + dataDir);
     }
 
-    // Backend has not started yet. Remove only Brahma Desk's managed user-data directory.
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    // Electron owns a lockfile inside userData for the lifetime of this process.
+    // Never remove the active userData directory: Windows can reject unlinking
+    // that lockfile with EBUSY, which prevents the app window from opening.
+    // Clear the directory's contents while preserving Electron's live lockfile.
     fs.mkdirSync(dataDir, { recursive: true });
+    for (const entry of fs.readdirSync(dataDir, { withFileTypes: true })) {
+      if (entry.name.toLowerCase() === "lockfile") {
+        log("Preserving Electron's active user-data lockfile during clean installation.");
+        continue;
+      }
+      const entryPath = path.join(dataDir, entry.name);
+      try {
+        fs.rmSync(entryPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch (error) {
+        throw new Error(`Could not clear Brahma Desk data item "${entry.name}": ${error.message}`);
+      }
+    }
     fs.writeFileSync(
       path.join(dataDir, "clean-install-pending.json"),
       JSON.stringify({ createdAt: new Date().toISOString(), version }),
       "utf8"
     );
-    log("Clean installation selected; Brahma Desk user data and managed models were reset.");
+    log("Clean installation selected; application data was reset while preserving Electron's active lockfile.");
   }
 
   writeInstallationState({ promptedVersion: version, selectedMode: choice.response === 1 ? "clean" : "standard" });
