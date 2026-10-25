@@ -1,0 +1,71 @@
+name: Windows installer validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Build backend executable
+        shell: pwsh
+        run: ./backend/build_backend.ps1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build and package Windows installer
+        working-directory: desktop
+        run: npm run dist:win
+
+      - name: Verify expected installer artifacts
+        shell: pwsh
+        run: |
+          $installer = "desktop/release/BrahmaDesk-Setup-$(node -p "require('./desktop/package.json').version").exe"
+          if (-not (Test-Path $installer)) {
+            throw "Expected installer was not produced: $installer"
+          }
+          if (-not (Test-Path "desktop/release/latest.yml")) {
+            throw "electron-builder did not produce latest.yml."
+          }
+          if (-not (Test-Path "desktop/build/icon.ico")) {
+            throw "Custom Windows icon is missing."
+          }
+          Get-Item $installer | Format-List FullName, Length
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrahmaDesk-Windows-Installer
+          path: |
+            desktop/release/BrahmaDesk-Setup-*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest.yml
+          if-no-files-found: error
+          retention-days: 14
