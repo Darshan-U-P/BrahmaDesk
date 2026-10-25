@@ -50,8 +50,18 @@ try {
         $stdoutPath = Join-Path $tempRoot "run-$run.stdout.txt"
         $stderrPath = Join-Path $tempRoot "run-$run.stderr.txt"
         $watch = [System.Diagnostics.Stopwatch]::StartNew()
-        & $exePath $modelFullPath --generate $Prompt $MaxNewTokens 1> $stdoutPath 2> $stderrPath
-        $exitCode = $LASTEXITCODE
+        # Windows PowerShell may turn native stderr output into a terminating
+        # NativeCommandError when ErrorActionPreference is Stop. Brahma writes
+        # its normal performance report to stderr, so temporarily allow it.
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            & $exePath $modelFullPath --generate $Prompt $MaxNewTokens 1> $stdoutPath 2> $stderrPath
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         $watch.Stop()
         $diagnostics = Get-Content -LiteralPath $stderrPath -Raw
         if ($exitCode -ne 0) {
