@@ -35,6 +35,20 @@ std::vector<float> matmul_f32(
     return c;
 }
 
+void swiglu_f32(
+    std::span<const float> gate,
+    std::span<const float> up,
+    std::span<float> output) {
+    if (gate.empty() || gate.size() != up.size() || output.size() != gate.size()) {
+        throw std::invalid_argument("SwiGLU input/output size mismatch or empty input");
+    }
+    for (std::size_t i = 0; i < gate.size(); ++i) {
+        const float x = gate[i];
+        const float silu = x / (1.0f + std::exp(-x));
+        output[i] = silu * up[i];
+    }
+}
+
 void rms_norm_f32(
     std::span<const float> input,
     std::span<const float> weight,
