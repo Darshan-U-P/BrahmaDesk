@@ -76,14 +76,16 @@ Function BrahmaComponentsPageLeave
   ${NSD_GetState} $BrahmaModelLaterControl $BrahmaDownloadModelLater
 
   ${If} $BrahmaLlamaServerPath != ""
-    IfFileExists "$BrahmaLlamaServerPath" +3 0
-      MessageBox MB_ICONEXCLAMATION "The selected llama-server.exe path does not exist."
-      Abort
+    IfFileExists "$BrahmaLlamaServerPath" BrahmaRuntimePathValid
+    MessageBox MB_ICONEXCLAMATION "The selected llama-server.exe path does not exist."
+    Abort
+    BrahmaRuntimePathValid:
   ${EndIf}
   ${If} $BrahmaModelPath != ""
-    IfFileExists "$BrahmaModelPath" +3 0
-      MessageBox MB_ICONEXCLAMATION "The selected GGUF model path does not exist."
-      Abort
+    IfFileExists "$BrahmaModelPath" BrahmaModelPathValid
+    MessageBox MB_ICONEXCLAMATION "The selected GGUF model path does not exist."
+    Abort
+    BrahmaModelPathValid:
   ${EndIf}
 
   CreateDirectory "$APPDATA\brahma-desk"
