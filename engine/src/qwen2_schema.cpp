@@ -1,5 +1,5 @@
 #include "brahma/qwen2_schema.hpp"
-#include <cmath>
+#include <algorithm>\n#include <cmath>\n#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <string>
