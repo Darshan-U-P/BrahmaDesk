@@ -320,10 +320,10 @@ Bug reports, feature suggestions, and improvement ideas are welcome. When report
 
 ## v0.2.0 release milestone
 
-Brahma Desk's custom lotus/atomic logo source is maintained at `desktop/build/logo.svg`, with branded installer artwork source at `desktop/build/installer-artwork.svg`. Windows packaging is configured to use `desktop/build/icon.ico`. The NSIS installer supports installation-directory selection, Start Menu and desktop shortcuts, launch-after-setup, and preserves application data when uninstalling.
+Brahma Desk's custom lotus/atomic logo source is maintained at `desktop/build/logo.svg`, with branded installer artwork source at `desktop/build/installer-artwork.svg`. Windows packaging is configured to use `desktop/build/icon.ico`. The MSI provides Start Menu and desktop shortcuts and launches Brahma Desk after setup. The app then offers a one-time installation-mode choice for that version.
 
 Before publishing a production installer, validate on Windows: clean install, upgrade from v0.1.2, profile persistence, existing GGUF discovery, model download cancellation/retry/integrity verification, updater download/install/restart, and uninstall data-preservation behavior. Do not mark the release verified until those tests pass on a built installer.
-## Windows MSI build (0.2.3)
+## Windows MSI build (0.2.4 preview)
 
 The Windows release target is a WiX-based MSI. The build stages a local llama.cpp runtime into the installer so the installed backend can use the bundled `llama-server.exe` and its adjacent DLLs.
 
@@ -339,7 +339,7 @@ The runtime directory must contain `llama-server.exe` and all DLLs shipped with 
 
 On first launch, Brahma Desk scans its managed model folder and common user model folders. If no supported local GGUF is discovered and the bundled runtime is available, it automatically downloads the recommended model from Hugging Face, checks available disk space and integrity metadata, then validates and activates it. This first-run download requires an internet connection; the MSI itself does not contain the multi-gigabyte model.
 
-MSI artifacts are written to `desktop/release/BrahmaDesk-Setup-0.2.3.msi`.
+MSI artifacts are written to `desktop/release/BrahmaDesk-Setup-0.2.4.msi`.
 
 
 ### Clean installation behavior (0.2.4 preview)
