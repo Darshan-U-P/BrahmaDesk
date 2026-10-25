@@ -1,4 +1,5 @@
 #include "brahma/gguf_reader.hpp"
+#include "brahma/qwen2_schema.hpp"
 #include "brahma/tensor_registry.hpp"
 #include "brahma/tensor_validator.hpp"
 
@@ -43,7 +44,7 @@ int main(int argc, char** argv) {
     }
 
     const std::string mode = argc == 3 ? argv[2] : "";
-    if (!mode.empty() && mode != "--list-tensors") {
+    if (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2") {
         print_usage();
         return 2;
     }
