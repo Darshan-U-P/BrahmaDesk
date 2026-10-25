@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(BrahmaEngine VERSION 0.1.0 LANGUAGES CXX)
 option(BRAHMA_ENGINE_BUILD_TESTS "Build Brahma Engine tests" ON)
-add_library(brahma_engine_core src/gguf_reader.cpp src/tensor_validator.cpp src/quantization.cpp src/tensor_ops.cpp src/tensor_loader.cpp src/tensor_registry.cpp src/qwen2_schema.cpp src/qwen2_block.cpp)
+add_library(brahma_engine_core src/gguf_reader.cpp src/tensor_validator.cpp src/quantization.cpp src/tensor_ops.cpp src/tensor_loader.cpp src/tensor_registry.cpp src/qwen2_schema.cpp src/qwen2_block.cpp src/qwen2_runtime.cpp src/qwen2_tokenizer.cpp)
 target_include_directories(brahma_engine_core PUBLIC include)
 target_compile_features(brahma_engine_core PUBLIC cxx_std_20)
 if(MSVC)
