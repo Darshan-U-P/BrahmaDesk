@@ -252,12 +252,12 @@ class LlamaCppServerBackend:
                 response = await client.post(
                     f"{self._base_url}/v1/chat/completions",
                     json={
+                        **request.options,
                         "model": self._model.model_id,
                         "messages": [{"role": "user", "content": request.prompt}],
                         "max_tokens": request.max_tokens,
                         "temperature": request.temperature,
                         "stream": False,
-                        **request.options,
                     },
                 )
                 response.raise_for_status()
