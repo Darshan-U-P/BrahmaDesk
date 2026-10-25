@@ -751,6 +751,10 @@ async def health() -> dict[str, Any]:
             return status
         except Exception as exc:
             status["startup_error"] = str(exc)
+    elif ENGINE_V1_ENABLED and not await llama_is_ready():
+        status["startup_error"] = status["startup_error"] or (
+            "No llama.cpp server is ready. Check the selected runtime and model in setup."
+        )
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
