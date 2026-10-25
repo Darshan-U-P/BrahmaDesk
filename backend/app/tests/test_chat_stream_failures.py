@@ -201,3 +201,46 @@ def test_read_error_during_stream_reports_error_and_does_not_persist():
             (user_text[:60],),
         ).fetchall()
     assert rows == []
+
+
+def test_engine_v1_opt_in_stream_persists_completed_exchange():
+    user_text = f"engine-v1-chat-{uuid.uuid4().hex}"
+    request = {"messages": [{"role": "user", "content": user_text}]}
+
+    class FakeChunk:
+        def __init__(self, text, finished=False):
+            self.text = text
+            self.finished = finished
+
+    class FakeSupervisor:
+        def __init__(self):
+            self.requests = []
+
+        async def generate(self, generation_request):
+            self.requests.append(generation_request)
+            yield FakeChunk("Engine ")
+            yield FakeChunk("v1 reply", finished=True)
+
+    fake = FakeSupervisor()
+    with patch.object(main, "ENGINE_V1_ENABLED", True), \
+         patch.object(main, "engine_v1_supervisor", fake):
+        response = client.post("/api/chat/stream", json=request)
+
+    assert response.status_code == 200
+    events = read_sse(response)
+    assert any(event.get("delta") == "Engine " for event in events)
+    assert any(event.get("delta") == "v1 reply" for event in events)
+    done = next(event for event in events if event.get("done") is True)
+    assert done["conversation_id"]
+    assert fake.requests[0].stream is True
+    assert fake.requests[0].messages[-1]["content"] == user_text
+
+    with main.db_connect() as db:
+        rows = db.execute(
+            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at",
+            (done["conversation_id"],),
+        ).fetchall()
+    assert [(row["role"], row["content"]) for row in rows] == [
+        ("user", user_text),
+        ("assistant", "Engine v1 reply"),
+    ]

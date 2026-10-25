@@ -20,6 +20,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+try:
+    if __package__:
+        from .engine import EngineError, EngineSettings, EngineSupervisor, GenerationRequest, LlamaCppServerBackend
+    else:
+        from engine import EngineError, EngineSettings, EngineSupervisor, GenerationRequest, LlamaCppServerBackend
+except ImportError:
+    EngineError = EngineSettings = EngineSupervisor = None  # type: ignore[assignment]
+    GenerationRequest = LlamaCppServerBackend = None  # type: ignore[assignment]
+
 
 # ---------------------------------------------------------------------------
 # Paths and configuration
@@ -242,6 +251,10 @@ LLAMA_GPU_LAYERS = os.getenv("LLAMA_GPU_LAYERS", "20")
 LLAMA_LOAD_MODE = os.getenv("LLAMA_LOAD_MODE", "auto")
 LLAMA_STARTUP_TIMEOUT = float(os.getenv("LLAMA_STARTUP_TIMEOUT", "180"))
 MODEL_ID = os.getenv("LLAMA_MODEL_ID", "local-model")
+
+# Opt-in only until Engine v1 has been verified in the local desktop workflow.
+ENGINE_V1_ENABLED = os.getenv("BRAHMA_ENGINE_V1_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+engine_v1_supervisor = None
 
 # Electron generates a random token and passes it to this backend.
 # The shutdown endpoint is disabled unless a token is configured.
@@ -497,8 +510,7 @@ async def start_llama_if_needed() -> None:
         MODEL_ID,
         "--host",
         LLAMA_HOST,
-        "--port",
-        str(LLAMA_PORT),
+        "--port",        str(LLAMA_PORT),
         "-t",
         str(LLAMA_THREADS),
         "-c",
@@ -564,23 +576,56 @@ async def start_llama_if_needed() -> None:
 # FastAPI lifecycle
 # ---------------------------------------------------------------------------
 
+def _engine_v1_mode() -> str:
+    mode = LLAMA_LOAD_MODE.strip().lower()
+    return mode if mode in {"auto", "cpu", "hybrid", "gpu"} else "auto"
+
+
+async def start_engine_v1() -> None:
+    """Start Engine v1's owned llama.cpp runtime using the selected local model."""
+    global engine_v1_supervisor
+    if EngineSupervisor is None or LlamaCppServerBackend is None or EngineSettings is None:
+        raise RuntimeError("Engine v1 modules are unavailable in this installation")
+    try:
+        gpu_layers: int | None = max(0, int(LLAMA_GPU_LAYERS))
+    except (TypeError, ValueError):
+        gpu_layers = None
+    supervisor = EngineSupervisor(
+        LlamaCppServerBackend(Path(LLAMA_SERVER_EXE).expanduser(), startup_timeout=LLAMA_STARTUP_TIMEOUT)
+    )
+    await supervisor.start(
+        Path(LLAMA_MODEL_PATH).expanduser(),
+        EngineSettings(context_size=LLAMA_CONTEXT_SIZE, mode=_engine_v1_mode(),
+                       threads=max(1, LLAMA_THREADS), gpu_layers=gpu_layers),
+    )
+    engine_v1_supervisor = supervisor
+    print("[Brahma Desk] Engine v1 is ready (owned llama.cpp runtime).", flush=True)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await load_saved_llama_server_path()
-    await start_llama_if_needed()
-
+    if ENGINE_V1_ENABLED:
+        await start_engine_v1()
+    else:
+        await start_llama_if_needed()
     try:
         yield
     finally:
-        # This also handles a normal backend shutdown.
-        async with shutdown_lock:
+        global engine_v1_supervisor
+        if ENGINE_V1_ENABLED and engine_v1_supervisor is not None:
             try:
-                stop_owned_llama()
-            except (OSError, subprocess.SubprocessError) as exc:
-                print(
-                    f"[Brahma Desk] Model shutdown error: {exc}",
-                    flush=True,
-                )
+                await engine_v1_supervisor.stop()
+            except Exception as exc:
+                print(f"[Brahma Desk] Engine v1 shutdown error: {exc}", flush=True)
+            finally:
+                engine_v1_supervisor = None
+        else:
+            async with shutdown_lock:
+                try:
+                    stop_owned_llama()
+                except (OSError, subprocess.SubprocessError) as exc:
+                    print(f"[Brahma Desk] Model shutdown error: {exc}", flush=True)
 
 
 app = FastAPI(
@@ -1024,53 +1069,64 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         generation_complete = False
 
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
-                    "POST",
-                    f"{LLAMA_BASE_URL}/v1/chat/completions",
-                    json=payload,
-                    headers={"Accept": "text/event-stream"},
-                ) as upstream:
-                    if upstream.status_code >= 400:
-                        body = await upstream.aread()
-                        yield (
-                            f"data: {json.dumps({'error': body.decode('utf-8', errors='replace')})}\n\n"
-                        )
-                        yield "data: [DONE]\n\n"
-                        return
-
-                    async for line in upstream.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-
-                        raw = line[5:].strip()
-
-                        if raw == "[DONE]":
-                            generation_complete = True
-                            break
-
-                        try:
-                            event = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue
-
-                        choices = event.get("choices") or []
-                        if not choices:
-                            continue
-
-                        delta = (choices[0].get("delta") or {}).get("content")
-
-                        if delta:
-                            answer += delta
-                            yield f"data: {json.dumps({'delta': delta})}\n\n"
+            if ENGINE_V1_ENABLED:
+                if engine_v1_supervisor is None or GenerationRequest is None:
+                    yield f"data: {json.dumps({'error': 'Engine v1 is enabled but not ready'})}\n\n"
+                    return
+                # Map the legacy unlimited sentinel to a safe bounded cap for Engine v1.
+                engine_max_tokens = max(1, min(1024, LLAMA_CONTEXT_SIZE - 256)) if request.max_tokens == -1 else request.max_tokens
+                messages = payload["messages"]
+                last_user = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+                options = {k: v for k, v in payload.items() if k not in {"model", "messages", "temperature", "max_tokens", "stream"}}
+                engine_request = GenerationRequest(
+                    prompt=last_user or next((m.get("content", "") for m in reversed(messages)), "Continue the conversation."),
+                    max_tokens=engine_max_tokens,
+                    temperature=request.temperature,
+                    options=options,
+                    messages=messages,
+                    stream=True,
+                )
+                async for chunk in engine_v1_supervisor.generate(engine_request):
+                    if chunk.text:
+                        answer += chunk.text
+                        yield f"data: {json.dumps({'delta': chunk.text})}\n\n"
+                    if chunk.finished:
+                        generation_complete = True
+            else:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream(
+                        "POST", f"{LLAMA_BASE_URL}/v1/chat/completions",
+                        json=payload, headers={"Accept": "text/event-stream"},
+                    ) as upstream:
+                        if upstream.status_code >= 400:
+                            body = await upstream.aread()
+                            yield f"data: {json.dumps({'error': body.decode('utf-8', errors='replace')})}\n\n"
+                            yield "data: [DONE]\n\n"
+                            return
+                        async for line in upstream.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            raw = line[5:].strip()
+                            if raw == "[DONE]":
+                                generation_complete = True
+                                break
+                            try:
+                                event = json.loads(raw)
+                            except json.JSONDecodeError:
+                                continue
+                            choices = event.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = (choices[0].get("delta") or {}).get("content")
+                            if delta:
+                                answer += delta
+                                yield f"data: {json.dumps({'delta': delta})}\n\n"
 
             if not generation_complete:
-                yield (
-                    f"data: {json.dumps({'error': 'Model response stream ended unexpectedly'})}\n\n"
-                )
+                yield f"data: {json.dumps({'error': 'Model response stream ended unexpectedly'})}\n\n"
                 return
 
-            # Persist the complete exchange only after generation finishes.
+            # Persist the completed exchange only after the backend indicates success.
             if not conversation_id:
                 conversation_id = str(uuid.uuid4())
                 first_user = next((m.content for m in request.messages if m.role == "user"), "New chat")
@@ -1081,12 +1137,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         (conversation_id, title, started, started, profile_id),
                     )
             with db_connect() as db:
-                exists = db.execute(
-                    "SELECT 1 FROM conversations WHERE id=? AND profile_id=?",
-                    (conversation_id, profile_id),
-                ).fetchone()
+                exists = db.execute("SELECT 1 FROM conversations WHERE id=? AND profile_id=?", (conversation_id, profile_id)).fetchone()
                 if exists:
-                    # Avoid duplicating messages already stored for this conversation.
                     stored = db.execute("SELECT COUNT(*) FROM messages WHERE conversation_id=?", (conversation_id,)).fetchone()[0]
                     incoming = [m for m in request.messages if m.role in ("user", "assistant")]
                     for message in incoming[stored:]:
@@ -1102,16 +1154,13 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                         db.execute("UPDATE conversations SET title=?, updated_at=? WHERE id=?", (suggested_title, time.time(), conversation_id))
                     else:
                         db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (time.time(), conversation_id))
-
-            yield (
-                f"data: {json.dumps({'done': True, 'request_id': request_id, 'conversation_id': conversation_id})}\n\n"
-            )
+            yield f"data: {json.dumps({'done': True, 'request_id': request_id, 'conversation_id': conversation_id})}\n\n"
 
         except httpx.HTTPError as exc:
-            yield (
-                f"data: {json.dumps({'error': f'Cannot reach llama.cpp server: {exc}'})}\n\n"
-            )
-
+            yield f"data: {json.dumps({'error': f'Cannot reach llama.cpp server: {exc}'})}\n\n"
+        except Exception as exc:
+            error_message = str(exc) if ENGINE_V1_ENABLED else "Generation failed"
+            yield f"data: {json.dumps({'error': error_message})}\n\n"
         finally:
             yield "data: [DONE]\n\n"
 
@@ -1671,4 +1720,3 @@ async def set_installer_runtime(request: InstallerRuntimePathRequest) -> dict[st
         )
     LLAMA_SERVER_EXE = str(candidate)
     return {"executable_path": LLAMA_SERVER_EXE, "exists": True, "saved": True}
-
