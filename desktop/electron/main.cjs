@@ -475,9 +475,7 @@ function readInstallationState() {
 
 function writeInstallationState(state) {
   const target = installationStatePath();
-  const temporary = target + ".tmp";
-  fs.writeFileSync(temporary, JSON.stringify(state, null, 2), "utf8");
-  fs.renameSync(temporary, target);
+  fs.writeFileSync(target, JSON.stringify(state, null, 2), "utf8");
 }
 
 async function chooseInstallationMode() {
