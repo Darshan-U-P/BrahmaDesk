@@ -117,7 +117,8 @@ def test_supervisor_reports_start_failure(tmp_path: Path) -> None:
     async def run() -> None:
         model_path = tmp_path / "model.gguf"
         model_path.write_bytes(b"GGUF" + b"\\0" * 16)
-        supervisor = EngineSupervisor(FakeBackend(fail_start=True))
+        backend = FakeBackend(fail_start=True)
+        supervisor = EngineSupervisor(backend)
 
         with pytest.raises(EngineError) as exc:
             await supervisor.start(model_path, EngineSettings())
