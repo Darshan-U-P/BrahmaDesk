@@ -1,4 +1,5 @@
 #include "brahma/tensor_loader.hpp"
+#include "brahma/tensor_registry.hpp"
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -47,7 +48,13 @@ int main() {
             out.write(reinterpret_cast<const char*>(values.data()), sizeof(values));
         }
         const auto model = brahma::GgufReader::inspect(path);
-        const auto loaded = brahma::load_gguf_tensor(model, path, "test.weight");
+        brahma::TensorRegistry registry(model, path);
+        require(registry.contains("test.weight"), "registry contains tensor");
+        require(!registry.contains("missing.weight"), "registry missing tensor");
+        require(registry.names().size() == 1, "registry name count");
+        require(registry.info("test.weight").name == "test.weight", "registry tensor info");
+        require(registry.layout("test.weight").bytes == 16, "registry tensor layout");
+        const auto loaded = registry.load("test.weight");
         require(loaded.info.name == "test.weight", "loaded tensor name");
         require(loaded.layout.elements == 4 && loaded.layout.bytes == 16, "loaded tensor layout");
         require(loaded.payload.size() == 16, "loaded payload byte count");
