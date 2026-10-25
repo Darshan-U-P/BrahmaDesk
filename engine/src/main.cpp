@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
                 }
                 const auto values = runtime.logits(ids);
                 std::cout.precision(9);
-                for (std::size_t i = 0; i < values.size(); ++i) std::cout << i << ',' << values[i] << '\\n';
+                for (std::size_t i = 0; i < values.size(); ++i) std::cout << i << ',' << values[i] << '\n';
                 return 0;
             }
             const auto ids = runtime.tokenize(argv[3]);
