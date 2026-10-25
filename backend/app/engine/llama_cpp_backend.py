@@ -1,8 +1,8 @@
-"""Owned-process llama.cpp adapter for the Brahma Engine contract.
+"""Owned-process llama.cpp server adapter for Brahma Desk.
 
-This adapter is intentionally opt-in: it owns only the Popen process it creates
-and binds it to a newly allocated loopback port. It never attaches to or kills
-an unrelated llama-server process.
+Only the llama-server process spawned by this adapter is ever stopped. The
+server binary and adjacent runtime DLLs are used in-place from the selected
+llama.cpp distribution directory.
 """
 from __future__ import annotations
 
@@ -162,6 +162,9 @@ class LlamaCppServerBackend:
             "-t", str(threads), "-c", str(settings.context_size),
             "-ngl", str(gpu_layers), "--no-webui",
         ]
+        # Run from the binary directory so Windows resolves CUDA/GGML DLLs
+        # distributed alongside llama-server.exe.
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             self._process = subprocess.Popen(
                 command,
@@ -169,6 +172,7 @@ class LlamaCppServerBackend:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
             )
         except OSError as exc:
             self._process = None
