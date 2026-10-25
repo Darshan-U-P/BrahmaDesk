@@ -53,7 +53,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .message-tools button:hover,.edit-message button:hover { background:#292633; }
 .account-button { transition:all .16s ease; }
 .account-button:hover { transform:translateY(-1px); }
-.local-card { background:linear-gradient(145deg,#1c2422,#191d1e); }
 @media (max-width: 1050px) {
   .sidebar { width:224px; }
   .topbar { padding:0 18px; }
