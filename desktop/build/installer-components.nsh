@@ -18,9 +18,9 @@ Function BrahmaComponentsPageCreate
   !insertmacro MUI_HEADER_TEXT "AI components" "Choose existing llama.cpp and GGUF files, or configure them later."
   nsDialogs::Create 1018
   Pop $0
-  \${If} $0 == error
+  ${If} $0 == error
     Abort
-  \${EndIf}
+  ${EndIf}
 
   ${NSD_CreateLabel} 0 0 100% 24u "llama.cpp runtime"
   Pop $0
@@ -52,19 +52,19 @@ FunctionEnd
 Function BrahmaBrowseRuntime
   nsDialogs::SelectFileDialog open "" "llama-server.exe|llama-server.exe|Executable files|*.exe"
   Pop $0
-  \${If} $0 != ""
+  ${If} $0 != ""
     ${NSD_SetText} $BrahmaLlamaPathControl $0
     ${NSD_Uncheck} $BrahmaRuntimeLaterControl
-  \${EndIf}
+  ${EndIf}
 FunctionEnd
 
 Function BrahmaBrowseModel
   nsDialogs::SelectFileDialog open "" "GGUF models|*.gguf|All files|*.*"
   Pop $0
-  \${If} $0 != ""
+  ${If} $0 != ""
     ${NSD_SetText} $BrahmaModelPathControl $0
     ${NSD_Uncheck} $BrahmaModelLaterControl
-  \${EndIf}
+  ${EndIf}
 FunctionEnd
 
 Function BrahmaComponentsPageLeave
@@ -73,14 +73,14 @@ Function BrahmaComponentsPageLeave
   ${NSD_GetState} $BrahmaRuntimeLaterControl $BrahmaDownloadRuntimeLater
   ${NSD_GetState} $BrahmaModelLaterControl $BrahmaDownloadModelLater
 
-  \${If} $BrahmaLlamaServerPath != ""
+  ${If} $BrahmaLlamaServerPath != ""
     IfFileExists "$BrahmaLlamaServerPath" +2 0
       Abort
-  \${EndIf}
-  \${If} $BrahmaModelPath != ""
+  ${EndIf}
+  ${If} $BrahmaModelPath != ""
     IfFileExists "$BrahmaModelPath" +2 0
       Abort
-  \${EndIf}
+  ${EndIf}
 
   CreateDirectory "$APPDATA\brahma-desk"
   ClearErrors
