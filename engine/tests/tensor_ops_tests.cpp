@@ -39,6 +39,36 @@ int main() {
         catch (const std::invalid_argument&) { rejected = true; }
         req(rejected, "RMSNorm invalid epsilon rejection");
 
+        // RoPE: position zero is identity; position one rotates [1,0] by one radian.
+        std::array<float, 4> rope_values{1, 0, 1, 0};
+        brahma::rope_f32(rope_values, 2, 2);
+        req(near(rope_values[0], 1) && near(rope_values[1], 0), "RoPE position zero");
+        req(near(rope_values[2], std::cos(1.0f)) &&
+            near(rope_values[3], std::sin(1.0f)), "RoPE position one");
+
+        // Zero Q/K gives uniform attention over only the causal prefix.
+        const std::array<float, 3> q{0, 0, 0};
+        const std::array<float, 3> k{0, 0, 0};
+        const std::array<float, 3> v{2, 4, 8};
+        std::array<float, 3> attn{};
+        brahma::causal_attention_f32(q, k, v, attn, 3, 1, 1);
+        req(near(attn[0], 2.0f), "causal attention token 0");
+        req(near(attn[1], 3.0f), "causal attention token 1");
+        req(near(attn[2], 14.0f/3.0f), "causal attention token 2");
+
+        rejected = false;
+        try {
+            std::array<float, 3> odd_rope{1, 2, 3};
+            brahma::rope_f32(odd_rope, 1, 3);
+        } catch (const std::invalid_argument&) { rejected = true; }
+        req(rejected, "RoPE odd head dimension rejection");
+
+        rejected = false;
+        try {
+            brahma::causal_attention_f32(q, k, v, attn, 3, 1, 2);
+        } catch (const std::invalid_argument&) { rejected = true; }
+        req(rejected, "attention shape mismatch rejection");
+
         std::cout << "CPU tensor operation tests passed\n";
         return 0;
     } catch (const std::exception& e) {
