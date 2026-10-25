@@ -34,16 +34,24 @@ int main(){
   try{brahma::TensorInfo bad{"unknown",{32},999,0};(void)brahma::tensor_layout(bad,m.tensor_data_offset,m.tensor_data_offset+4096);}
   catch(const std::exception&){rejected=true;}
   req(rejected,"unknown type rejection");
+  // Non-uniform fixture exercises both scale/min decoding and nibble ordering.
   std::array<std::uint8_t,144> q4_block{};
-  q4_block[0]=0x00;q4_block[1]=0x3c; // fp16 d = 1.0
-  for(std::size_t i=4;i<16;++i)q4_block[i]=1; // initialize all 12 packed scale/min bytes
-  for(std::size_t i=16;i<144;++i)q4_block[i]=0x11;
+  q4_block[0]=0x00;q4_block[1]=0x40; // fp16 d = 2.0
+  q4_block[2]=0x00;q4_block[3]=0x38; // fp16 dmin = 0.5
+  q4_block[4]=1;q4_block[5]=2;q4_block[6]=3;q4_block[7]=4;
+  q4_block[8]=5;q4_block[9]=6;q4_block[10]=7;q4_block[11]=8;
+  for(std::size_t i=16;i<144;++i)q4_block[i]=0x11; // low and high nibbles are both 1
   std::array<float,256> decoded{};
   brahma::dequantize_q4_k_block(q4_block,decoded);
-  for(const auto v:decoded)req(v==1.0f,"Q4_K known-value dequantization");
+  for(std::size_t i=0;i<32;++i)req(decoded[i]==-0.5f,"Q4_K scale/min group 0 low nibbles");
+  for(std::size_t i=32;i<64;++i)req(decoded[i]==1.0f,"Q4_K scale/min group 0 high nibbles");
+  for(std::size_t i=64;i<96;++i)req(decoded[i]==2.5f,"Q4_K scale/min group 1 low nibbles");
+  for(std::size_t i=96;i<128;++i)req(decoded[i]==4.0f,"Q4_K scale/min group 1 high nibbles");
+  for(std::size_t i=128;i<256;++i)req(decoded[i]==0.0f,"Q4_K zero-scale groups");
   std::vector<std::uint8_t> q4_payload(q4_block.begin(),q4_block.end());
   const auto decoded_vector=brahma::dequantize_q4_k(q4_payload,256);
-  req(decoded_vector.size()==256&&decoded_vector[255]==1.0f,"Q4_K tensor dequantization");
+  req(decoded_vector.size()==256&&decoded_vector[0]==-0.5f&&decoded_vector[127]==4.0f,
+      "Q4_K tensor dequantization");
   rejected=false;
   try{(void)brahma::dequantize_q4_k(q4_payload,255);}catch(const std::exception&){rejected=true;}
   req(rejected,"Q4_K invalid element count rejection");
