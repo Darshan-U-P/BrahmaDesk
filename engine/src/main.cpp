@@ -16,6 +16,7 @@ void print_usage() {
         << "Usage:\n"
         << "  brahma-engine <model.gguf>\n"
         << "  brahma-engine <model.gguf> --list-tensors\n"
+        << "  brahma-engine <model.gguf> --validate-qwen2\n"
         << "Brahma Engine Core: GGUF inspection and tensor payload validation; inference is not implemented yet.\n";
 }
 
@@ -55,6 +56,19 @@ int main(int argc, char** argv) {
 
         if (mode == "--list-tensors") {
             print_tensor_list(registry);
+            return 0;
+        }
+        if (mode == "--validate-qwen2") {
+            const auto config = brahma::validate_qwen2_schema(registry.model());
+            std::cout << "Qwen2 schema validation: PASS\\n"
+                      << "Hidden size: " << config.hidden_size << "\\n"
+                      << "Feed-forward size: " << config.feed_forward_size << "\\n"
+                      << "Transformer blocks: " << config.block_count << "\\n"
+                      << "Attention heads: " << config.attention_heads << "\\n"
+                      << "KV heads: " << config.kv_heads << "\\n"
+                      << "Vocabulary size: " << config.vocabulary_size << "\\n"
+                      << "RoPE theta: " << config.rope_theta << "\\n"
+                      << "RMSNorm epsilon: " << config.rms_norm_epsilon << "\\n";
             return 0;
         }
 
