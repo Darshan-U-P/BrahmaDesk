@@ -39,7 +39,7 @@ class FakeBackend:
                 "Model file does not exist.",
                 "inspect_model",
             )
-        return ModelArtifact(model_id="test-model", path=path, verified=True)
+        return ModelArtifact(model_id=path.stem, path=path, verified=True)
 
     async def plan(self, model: ModelArtifact, settings: EngineSettings) -> ResourcePlan:
         return ResourcePlan(selected_mode=settings.mode, context_size=settings.context_size)
