@@ -27,6 +27,8 @@ public:
     // Replays the supplied token IDs from position zero and returns next-token logits.
     [[nodiscard]] std::vector<float> logits(std::span<const std::uint32_t> token_ids);
     [[nodiscard]] std::uint32_t greedy_next_token(std::span<const std::uint32_t> token_ids);
+    // Greedy Qwen2.5-Instruct generation using the tokenizer embedded in GGUF.
+    [[nodiscard]] std::string generate(const std::string& prompt, std::size_t max_new_tokens = 32);
 
 private:
     struct Impl;
