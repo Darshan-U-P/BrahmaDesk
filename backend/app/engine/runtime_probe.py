@@ -5,8 +5,9 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from .contracts import EngineError, EngineSettings, EngineSupervisor, GenerationRequest
+from .contracts import EngineError, EngineSettings, GenerationRequest
 from .llama_cpp_backend import LlamaCppServerBackend
+from .supervisor import EngineSupervisor
 
 
 async def probe_runtime(
