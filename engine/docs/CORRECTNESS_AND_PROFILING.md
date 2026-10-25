@@ -57,7 +57,14 @@ The executable prints whether it was compiled with OpenMP. CMake uses `find_pack
 
 ## Logit/reference comparison
 
-The runtime API exposes `Qwen2Runtime::logits(token_ids)`, which returns next-token logits after replaying token IDs from position zero. Use a small external C++ validation harness or test to compare those logits with an independent runtime using identical token IDs, model file, context positions, and tensor semantics. Report max absolute error, relative error, top-1 token agreement, and the first differing token. The CLI currently does not serialize logits, and the repository does not yet contain a trusted-reference logit fixture. Therefore numerical parity is **not established by this profiling update**.
+The runtime API exposes `Qwen2Runtime::logits(token_ids)`, which returns next-token logits after replaying token IDs from position zero. The CLI can dump the full logits vector as CSV (index,value):
+
+```powershell
+$model = "$env:APPDATA\\brahma-desk\\models\\Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+.\\engine\\build\\Release\\brahma-engine.exe $model --logits "1,2,3" > brahma_logits.csv
+```
+
+Replace `1,2,3` with token IDs from the same model/tokenizer. Compare with an independent runtime using identical token IDs, model file, context positions, and tensor semantics. Report max absolute error, relative error, top-1 token agreement, and the first differing token. The repository does not yet contain a trusted-reference logit fixture, and no numerical parity result has been verified in this update.
 
 ## Current known limitations
 
