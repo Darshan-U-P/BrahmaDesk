@@ -146,9 +146,10 @@ Qwen2Tokenizer::Qwen2Tokenizer(const GgufModelInfo& model) {
 std::vector<std::uint32_t> Qwen2Tokenizer::encode(const std::string& text) const {
     std::vector<std::uint32_t> result;
     auto encode_piece = [&](const std::string& piece) {
+      for (const auto& chunk : pretokenize(piece)) {
         std::vector<std::string> symbols;
-        symbols.reserve(piece.size());
-        for (const unsigned char c : piece) symbols.push_back(byte_symbol(c));
+        symbols.reserve(chunk.size());
+        for (const unsigned char c : chunk) symbols.push_back(byte_symbol(c));
         while (symbols.size() > 1) {
             std::size_t best = symbols.size();
             std::uint32_t best_rank = std::numeric_limits<std::uint32_t>::max();
@@ -167,6 +168,7 @@ std::vector<std::uint32_t> Qwen2Tokenizer::encode(const std::string& text) const
             if (it == token_ids_.end()) throw std::runtime_error("Tokenizer cannot encode a byte sequence in the model vocabulary");
             result.push_back(it->second);
         }
+      }
     };
 
     std::size_t pos = 0;
