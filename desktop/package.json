@@ -1,6 +1,6 @@
 {
   "name": "brahma-desk",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -9,7 +9,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-llama-runtime.ps1",
-    "dist:win": "npm run build && npm run stage:runtime && electron-builder --win msi",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../backend/build_backend.ps1",
+    "dist:win": "npm run build && npm run stage:runtime && npm run build:backend && electron-builder --win msi",
     "dist:dir": "npm run build && electron-builder --dir"
   },
   "dependencies": {
