@@ -599,7 +599,13 @@ async def start_engine_v1(*, force_owned: bool = False) -> None:
     executable = Path(LLAMA_SERVER_EXE).expanduser()
     model_path = Path(LLAMA_MODEL_PATH).expanduser()
     try:
-        gpu_layers: int | None = max(0, int(LLAMA_GPU_LAYERS))
+        # Explicit setup configuration is saved with its resolved mode. Keep
+        # CPU mode truly CPU-only even if a stale environment value requests
+        # layer offload; GPU/hybrid use the configured layer budget.
+        gpu_layers: int | None = (
+            0 if _engine_v1_mode() == "cpu"
+            else max(0, int(LLAMA_GPU_LAYERS))
+        )
     except (TypeError, ValueError):
         gpu_layers = None
 
