@@ -4,6 +4,12 @@
 #include <limits>
 #include <stdexcept>
 #include <utility>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
 
 namespace brahma {
 namespace {
@@ -63,32 +69,191 @@ std::string byte_symbol(unsigned char b) {
     append_utf8(out, byte_to_codepoint()[b]);
     return out;
 }
-bool is_space(unsigned char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
-bool is_word_byte(unsigned char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-    (c >= '0' && c <= '9') || c >= 0x80 || c == '_'; }
+struct CodePoint {
+    std::uint32_t value;
+    std::size_t begin;
+    std::size_t end;
+};
+
+std::vector<CodePoint> codepoints(const std::string& text) {
+    std::vector<CodePoint> result;
+    for (std::size_t i = 0; i < text.size();) {
+        const auto begin = i;
+        const auto cp = read_cp(text, i);
+        result.push_back({cp, begin, i});
+    }
+    return result;
+}
+
+bool is_line_break(std::uint32_t cp) { return cp == '\r' || cp == '\n'; }
+
+bool is_unicode_space(std::uint32_t cp) {
+    if (cp == 0x20 || (cp >= 0x09 && cp <= 0x0d) || cp == 0x85 ||
+        cp == 0xa0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200a) ||
+        cp == 0x2028 || cp == 0x2029 || cp == 0x202f || cp == 0x205f ||
+        cp == 0x3000) return true;
+#ifdef _WIN32
+    if (cp <= 0xffff) {
+        const wchar_t ch = static_cast<wchar_t>(cp);
+        WORD type = 0;
+        if (GetStringTypeW(CT_CTYPE1, &ch, 1, &type) != 0 && (type & C1_SPACE) != 0)
+            return true;
+    }
+#endif
+    return false;
+}
+
+bool is_unicode_letter_or_number(std::uint32_t cp) {
+    if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ||
+        (cp >= '0' && cp <= '9')) return true;
+#ifdef _WIN32
+    if (cp <= 0xffff) {
+        const wchar_t ch = static_cast<wchar_t>(cp);
+        WORD type = 0;
+        if (GetStringTypeW(CT_CTYPE1, &ch, 1, &type) != 0 &&
+            (type & (C1_ALPHA | C1_DIGIT)) != 0) return true;
+    }
+#endif
+    // Portable fallback for common scripts when Windows Unicode classification is unavailable.
+    return (cp >= 0x00c0 && cp <= 0x02af) ||
+           (cp >= 0x0370 && cp <= 0x052f) ||
+           (cp >= 0x0531 && cp <= 0x1fff) ||
+           (cp >= 0x2c00 && cp <= 0xd7ff) ||
+           (cp >= 0xf900 && cp <= 0xfaff) ||
+           (cp >= 0x10000 && cp <= 0x1efff) ||
+           (cp >= 0x0660 && cp <= 0x0669) ||
+           (cp >= 0x06f0 && cp <= 0x06f9) ||
+           (cp >= 0x0966 && cp <= 0x096f) ||
+           (cp >= 0xff10 && cp <= 0xff19);
+}
+
+bool is_unicode_letter(std::uint32_t cp) {
+    if (cp >= '0' && cp <= '9') return false;
+    if (cp >= 0x0660 && cp <= 0x0669) return false;
+    if (cp >= 0x06f0 && cp <= 0x06f9) return false;
+    if (cp >= 0x0966 && cp <= 0x096f) return false;
+    if (cp >= 0xff10 && cp <= 0xff19) return false;
+#ifdef _WIN32
+    if (cp <= 0xffff) {
+        const wchar_t ch = static_cast<wchar_t>(cp);
+        WORD type = 0;
+        if (GetStringTypeW(CT_CTYPE1, &ch, 1, &type) != 0)
+            return (type & C1_ALPHA) != 0;
+    }
+#endif
+    return is_unicode_letter_or_number(cp) &&
+           !((cp >= 0x00d7 && cp <= 0x00f7) ||
+             (cp >= 0x2000 && cp <= 0x206f));
+}
+
+bool is_ascii_contraction(const std::string& text, std::size_t byte_pos, std::size_t& byte_end) {
+    if (byte_pos >= text.size() || text[byte_pos] != '\'') return false;
+    static constexpr const char* endings[] = {"re", "ve", "ll", "s", "t", "m", "d"};
+    for (const auto* ending : endings) {
+        std::size_t j = 0;
+        while (ending[j] != '\0' && byte_pos + 1 + j < text.size()) {
+            const auto c = static_cast<unsigned char>(text[byte_pos + 1 + j]);
+            if (static_cast<char>(std::tolower(c)) != ending[j]) break;
+            ++j;
+        }
+        if (ending[j] == '\0') {
+            byte_end = byte_pos + 1 + j;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Mirrors the ordered Qwen2/GPT-2-family Unicode regex pre-tokenizer:
+// contractions, optional prefix + letters, 1-3 digit groups, punctuation,
+// newline groups, trailing whitespace, then remaining whitespace.
 std::vector<std::string> pretokenize(const std::string& text) {
+    const auto cps = codepoints(text);
     std::vector<std::string> out;
     std::size_t i = 0;
-    while (i < text.size()) {
+    const auto emit = [&](std::size_t first, std::size_t last) {
+        if (first < last) out.emplace_back(text.substr(cps[first].begin, cps[last - 1].end - cps[first].begin));
+    };
+    while (i < cps.size()) {
         const auto start = i;
-        const auto c = static_cast<unsigned char>(text[i]);
-        if (is_space(c)) {
-            while (i < text.size() && is_space(static_cast<unsigned char>(text[i]))) ++i;
-            // GPT-style tokenizers commonly attach one leading space to the next word.
-            if (text[start] == ' ' && i - start == 1 && i < text.size() && !is_space(static_cast<unsigned char>(text[i]))) {
-                const auto next = static_cast<unsigned char>(text[i]);
-                if (is_word_byte(next)) {
-                    ++i;
-                    while (i < text.size() && is_word_byte(static_cast<unsigned char>(text[i]))) ++i;
-                }
-            }
-        } else if (is_word_byte(c)) {
-            while (i < text.size() && is_word_byte(static_cast<unsigned char>(text[i]))) ++i;
-        } else {
-            while (i < text.size() && !is_space(static_cast<unsigned char>(text[i])) &&
-                   !is_word_byte(static_cast<unsigned char>(text[i]))) ++i;
+        std::size_t contraction_end = 0;
+        if (cps[i].value == '\'' && is_ascii_contraction(text, cps[i].begin, contraction_end)) {
+            while (i < cps.size() && cps[i].end <= contraction_end) ++i;
+            emit(start, i);
+            continue;
         }
-        out.emplace_back(text.substr(start, i - start));
+
+        // [^\r\n\p{L}\p{N}]?\p{L}+
+        std::size_t letter_start = i;
+        if (!is_unicode_letter_or_number(cps[i].value) && !is_line_break(cps[i].value) &&
+            i + 1 < cps.size() && is_unicode_letter(cps[i + 1].value)) {
+            letter_start = i + 1;
+        }
+        if (is_unicode_letter(cps[letter_start].value)) {
+            i = letter_start + 1;
+            while (i < cps.size() && is_unicode_letter(cps[i].value)) ++i;
+            emit(start, i);
+            continue;
+        }
+
+        // \p{N}{1,3}; longer digit runs are split into groups of at most 3.
+        if (is_unicode_letter_or_number(cps[i].value) && !is_unicode_letter(cps[i].value)) {
+            std::size_t count = 0;
+            while (i < cps.size() && is_unicode_letter_or_number(cps[i].value) &&
+                   !is_unicode_letter(cps[i].value) && count < 3) {
+                ++i;
+                ++count;
+            }
+            emit(start, i);
+            continue;
+        }
+
+        //  ?[^\s\p{L}\p{N}]+[\r\n]*
+        std::size_t punctuation_start = i;
+        if (cps[i].value == ' ' && i + 1 < cps.size() &&
+            !is_unicode_space(cps[i + 1].value) &&
+            !is_unicode_letter_or_number(cps[i + 1].value)) {
+            punctuation_start = i + 1;
+        }
+        if (!is_unicode_space(cps[punctuation_start].value) &&
+            !is_unicode_letter_or_number(cps[punctuation_start].value)) {
+            i = punctuation_start + 1;
+            while (i < cps.size() && !is_unicode_space(cps[i].value) &&
+                   !is_unicode_letter_or_number(cps[i].value)) ++i;
+            while (i < cps.size() && is_line_break(cps[i].value)) ++i;
+            emit(start, i);
+            continue;
+        }
+
+        // \s*[\r\n]+
+        if (is_line_break(cps[i].value) || is_unicode_space(cps[i].value)) {
+            std::size_t j = i;
+            while (j < cps.size() && is_unicode_space(cps[j].value) &&
+                   !is_line_break(cps[j].value)) ++j;
+            if (j < cps.size() && is_line_break(cps[j].value)) {
+                i = j;
+                while (i < cps.size() && is_line_break(cps[i].value)) ++i;
+                emit(start, i);
+                continue;
+            }
+            // \s+(?!\S) consumes trailing whitespace as one piece.
+            bool trailing = true;
+            for (std::size_t k = i; k < cps.size(); ++k) {
+                if (!is_unicode_space(cps[k].value)) { trailing = false; break; }
+            }
+            if (trailing) {
+                i = cps.size();
+                emit(start, i);
+                continue;
+            }
+            while (i < cps.size() && is_unicode_space(cps[i].value)) ++i;
+            emit(start, i);
+            continue;
+        }
+
+        // Defensive progress for unclassified code points.
+        ++i;
+        emit(start, i);
     }
     return out;
 }
