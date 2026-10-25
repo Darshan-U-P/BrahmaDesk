@@ -2,6 +2,8 @@ param(
     [string]$RuntimeDir = $env:LLAMA_CPP_RUNTIME_DIR
 )
 $ErrorActionPreference = "Stop"
+# Native executables can write version output to stderr; keep that from being
+# promoted to a terminating PowerShell error under PowerShell 7.
 $DesktopRoot = Split-Path -Parent $PSScriptRoot
 $StageDir = Join-Path $DesktopRoot "build/llama-runtime"
 
@@ -14,8 +16,17 @@ $Server = Join-Path $RuntimeDir "llama-server.exe"
 if (-not (Test-Path -LiteralPath $Server -PathType Leaf)) {
     throw "llama-server.exe was not found at '$Server'. Set LLAMA_CPP_RUNTIME_DIR to the folder containing the CUDA-enabled llama-server.exe and its DLLs."
 }
-$Version = & $Server --version 2>&1
-if ($LASTEXITCODE -ne 0) {
+$PreviousNativePreference = $PSNativeCommandUseErrorActionPreference
+$PSNativeCommandUseErrorActionPreference = $false
+try {
+    $VersionOutput = & $Server --version 2>&1
+    $VersionExitCode = $LASTEXITCODE
+}
+finally {
+    $PSNativeCommandUseErrorActionPreference = $PreviousNativePreference
+}
+$Version = $VersionOutput -join [Environment]::NewLine
+if ($VersionExitCode -ne 0) {
     throw "The selected llama-server.exe failed its --version check: $Version"
 }
 
