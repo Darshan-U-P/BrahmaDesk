@@ -12,11 +12,12 @@ int main(){
  try {
   const std::array<float,4> input{1.0f,2.0f,3.0f,4.0f};
   const std::array<float,4> ones{1,1,1,1}, zeros{0,0,0,0};
+  const std::array<float,2> kv_zeros{0,0};
   const std::array<float,16> identity{1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
   const std::array<float,8> kv_projection{1,0, 0,1, 1,0, 0,1};
   const std::array<float,16> zero_matrix{};
   brahma::Qwen2BlockWeights w{
-   ones,identity,zeros,kv_projection,zeros,kv_projection,zeros,
+   ones,identity,zeros,kv_projection,kv_zeros,kv_projection,kv_zeros,
    identity,ones,zero_matrix,zero_matrix,zero_matrix
   };
   const auto out=brahma::qwen2_transformer_block_f32(input,1,4,4,2,1,10000.0f,1.0e-5f,w);
