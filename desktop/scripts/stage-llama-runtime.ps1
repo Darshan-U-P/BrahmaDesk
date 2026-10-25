@@ -16,6 +16,8 @@ $Server = Join-Path $RuntimeDir "llama-server.exe"
 if (-not (Test-Path -LiteralPath $Server -PathType Leaf)) {
     throw "llama-server.exe was not found at '$Server'. Set LLAMA_CPP_RUNTIME_DIR to the folder containing the CUDA-enabled llama-server.exe and its DLLs."
 }
+$PreviousErrorPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 $PreviousNativePreference = $PSNativeCommandUseErrorActionPreference
 $PSNativeCommandUseErrorActionPreference = $false
 try {
@@ -24,6 +26,7 @@ try {
 }
 finally {
     $PSNativeCommandUseErrorActionPreference = $PreviousNativePreference
+    $ErrorActionPreference = $PreviousErrorPreference
 }
 $Version = $VersionOutput -join [Environment]::NewLine
 if ($VersionExitCode -ne 0) {
