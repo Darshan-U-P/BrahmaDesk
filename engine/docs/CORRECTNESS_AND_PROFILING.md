@@ -27,20 +27,16 @@ The script uses `--no-bos` for llama.cpp so its output can be compared with Brah
 
 ## Repeatable inference benchmark
 
-Run each case three times. Keep the same prompt and generated-token cap; record the median prefill and decode rates. The first run may be affected by Windows file cache, antivirus, and CPU boost state.
+Use the checked-in script to run a fixed prompt multiple times, parse runtime diagnostics, write per-run CSV data, and report medians. Run from the repository root:
 
 ```powershell
 $model = "$env:APPDATA\brahma-desk\models\Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-$prompt = "Explain photosynthesis in one simple sentence."
-1..3 | ForEach-Object {
-    "===== Run $_ ====="
-    Measure-Command {
-        .\engine\build\Release\brahma-engine.exe $model --generate $prompt 8
-    } | Select-Object TotalSeconds
-}
+.\engine\scripts\benchmark-inference.ps1 -ModelPath $model -Runs 5 -MaxNewTokens 8 -OutputCsv .\brahma-benchmark.csv
 ```
 
-The executable writes generated text to stdout and timing diagnostics to stderr. Capture both streams if keeping a benchmark log.
+Optional parameters include `-Prompt "your fixed prompt"` and `-BrahmaExe .\engine\build\Release\brahma-engine.exe`. Use an odd run count (for example, 5) for a conventional median. The CSV contains per-run construction, prefill, decode, projection, RMSNorm, attention, token counts, backend label, and wall-clock time. The script keeps generated text and diagnostics in temporary files and removes those files after each run. The first run may be affected by Windows file cache, antivirus, and CPU boost state; keep machine, power mode, model, prompt, and token cap constant across commits.
+
+The executable writes generated text to stdout and timing diagnostics to stderr. The benchmark script captures both streams separately.
 
 ## Reported metrics and interpretation
 
@@ -74,3 +70,17 @@ Replace `1,2,3` with token IDs from the same model/tokenizer. Compare with an in
 - No independent reference-logit comparison is included yet.
 - The profiler is CPU wall-clock instrumentation and adds a small amount of timing overhead.
 - Current prompt prefill is sequential, and the runtime remains CPU-only.
+
+
+## Phase 1 status snapshot
+
+This status is based on the repository's current implementation and the latest locally reported test results; it is not a claim that tests were run by CI during this commit.
+
+- **GGUF parsing and tensor validation:** implemented; the seven CTest suites passed in the latest user-reported run.
+- **Tokenizer parity:** the reference script passed 9/9 selected strings on the user's machine, including Kannada and Hindi. This covers those cases only.
+- **Next-token sanity check:** for the one-token input ID sequence `[9707]` corresponding to `Hello`, Brahma and llama.cpp both selected token ID `358`. This is a top-1 agreement on one case, not full numerical parity.
+- **Numerical logit parity:** incomplete. Brahma can dump the full vocabulary logits; the current llama.cpp server check returned only top-N log-probabilities. These are sufficient for a limited relative-gap diagnostic, not a full-vector error metric. The repository does not yet include a trusted raw-reference-logit fixture.
+- **Model-load timing:** runtime construction is timed, but tensor payloads are loaded lazily; this is not full eager model-load time.
+- **Operator profiling:** projection, RMSNorm and attention-core wall time are reported. Projection has dominated the user's previously reported CPU run. Other operators and allocation overhead are not individually timed.
+- **OpenMP:** compile-time backend reporting is present. A controlled OpenMP-versus-serial speedup comparison remains to be performed.
+- **Repeatable benchmarks:** `engine/scripts/benchmark-inference.ps1` runs repeated inference trials, exports per-run CSV metrics, and reports medians. Run it locally to establish a baseline; no benchmark result is asserted by this commit.
