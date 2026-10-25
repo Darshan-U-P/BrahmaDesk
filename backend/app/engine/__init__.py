@@ -1,4 +1,4 @@
-"""Brahma Engine interfaces and runtime implementations."""
+"""Brahma Engine interfaces and lifecycle orchestration."""
 
 from .contracts import (
     EngineError,
@@ -12,6 +12,7 @@ from .contracts import (
     ModelArtifact,
     ResourcePlan,
 )
+from .supervisor import EngineSupervisor
 
 __all__ = [
     "EngineError",
@@ -24,4 +25,5 @@ __all__ = [
     "InferenceBackend",
     "ModelArtifact",
     "ResourcePlan",
+    "EngineSupervisor",
 ]
