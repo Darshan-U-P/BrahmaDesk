@@ -114,6 +114,8 @@ class GenerationRequest:
     max_tokens: int = 256
     temperature: float = 0.7
     options: dict[str, Any] = field(default_factory=dict)
+    messages: list[dict[str, Any]] | None = None
+    stream: bool = False
 
     def __post_init__(self) -> None:
         if not self.prompt.strip():
