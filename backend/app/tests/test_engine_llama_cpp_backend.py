@@ -75,3 +75,77 @@ def test_stop_does_not_touch_process_when_none_is_owned(tmp_path: Path) -> None:
     asyncio.run(backend.stop())
 
     assert backend._process is None
+
+
+
+def test_generate_uses_full_messages_and_streams_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    backend = LlamaCppServerBackend(tmp_path / "llama-server.exe")
+    backend._base_url = "http://127.0.0.1:12345"
+    backend._model = type("Model", (), {"model_id": "test-model"})()
+
+    async def endpoint_ready() -> bool:
+        return True
+
+    class FakeResponse:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def aiter_lines(self):
+            yield 'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}'
+            yield 'data: {"choices":[{"delta":{"content":" world"},"finish_reason":null}]}'
+            yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}'
+            yield "data: [DONE]"
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, method, url, *, json, headers):
+            assert method == "POST"
+            assert url.endswith("/v1/chat/completions")
+            assert json["stream"] is True
+            assert json["messages"] == [
+                {"role": "system", "content": "Be concise."},
+                {"role": "user", "content": "Hello"},
+            ]
+            return FakeResponse()
+
+    monkeypatch.setattr(backend, "_endpoint_ready", endpoint_ready)
+    monkeypatch.setattr("app.engine.llama_cpp_backend.httpx.AsyncClient", FakeClient)
+
+    async def collect():
+        chunks = []
+        async for chunk in backend.generate(
+            __import__("app.engine.contracts", fromlist=["GenerationRequest"]).GenerationRequest(
+                prompt="Hello",
+                messages=[
+                    {"role": "system", "content": "Be concise."},
+                    {"role": "user", "content": "Hello"},
+                ],
+                stream=True,
+            )
+        ):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(collect())
+    assert "".join(chunk.text for chunk in chunks) == "Hello world"
+    assert any(chunk.finished and chunk.finish_reason == "stop" for chunk in chunks)
