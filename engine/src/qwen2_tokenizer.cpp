@@ -75,7 +75,7 @@ std::vector<std::string> pretokenize(const std::string& text) {
         if (is_space(c)) {
             while (i < text.size() && is_space(static_cast<unsigned char>(text[i]))) ++i;
             // GPT-style tokenizers commonly attach one leading space to the next word.
-            if (i - start == 1 && i < text.size() && !is_space(static_cast<unsigned char>(text[i]))) {
+            if (text[start] == ' ' && i - start == 1 && i < text.size() && !is_space(static_cast<unsigned char>(text[i]))) {
                 const auto next = static_cast<unsigned char>(text[i]);
                 if (is_word_byte(next)) {
                     ++i;
