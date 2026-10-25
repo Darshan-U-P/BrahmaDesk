@@ -942,7 +942,8 @@ def build_generation_payload(request: ChatRequest, chat_messages: list[dict[str,
         "medium": "Use moderate internal reasoning, aiming for no more than about 2048 reasoning tokens before answering.",
         "high": "Use thorough internal reasoning, aiming for no more than about 8192 reasoning tokens before answering.",
         "max": "Use as much internal reasoning as is useful before answering; there is no application-level reasoning budget target.",
-    }    if request.reasoning_budget != "off":
+    }
+    if request.reasoning_budget != "off":
         guidance = reasoning_guidance[request.reasoning_budget]
         instruction = "Reasoning effort preference: " + guidance
         if messages and messages[0].get("role") == "system":
