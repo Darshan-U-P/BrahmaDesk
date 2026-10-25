@@ -35,6 +35,18 @@ std::vector<float> matmul_f32(
     return c;
 }
 
+void add_f32(
+    std::span<const float> a,
+    std::span<const float> b,
+    std::span<float> output) {
+    if (a.empty() || a.size() != b.size() || output.size() != a.size()) {
+        throw std::invalid_argument("Addition input/output size mismatch or empty input");
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        output[i] = a[i] + b[i];
+    }
+}
+
 void swiglu_f32(
     std::span<const float> gate,
     std::span<const float> up,
