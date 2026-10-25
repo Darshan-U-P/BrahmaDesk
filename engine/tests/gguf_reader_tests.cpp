@@ -1,4 +1,5 @@
 #include "brahma/gguf_reader.hpp"
+#include "brahma/tensor_validator.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -15,7 +16,7 @@ int main(){
   str(o,"general.alignment");wr(o,std::uint32_t(4));wr(o,std::uint32_t(32));
   str(o,"token_embd.weight");wr(o,std::uint32_t(2));wr(o,std::uint64_t(4));wr(o,std::uint64_t(8));wr(o,std::uint32_t(0));wr(o,std::uint64_t(0));
   auto pos=std::uint64_t(o.tellp());auto pad=(32-pos%32)%32;for(std::uint64_t i=0;i<pad;++i)o.put('\0');o.put('\0');o.close();
-  auto m=brahma::GgufReader::inspect(p);req(m.version==3,"version");req(m.architecture()=="llama","architecture");req(m.tensors.size()==1,"tensor count");req(m.tensors[0].name=="token_embd.weight","tensor name");req(m.tensors[0].dimensions.size()==2&&m.tensors[0].dimensions[1]==8,"dimensions");req(m.alignment==32,"alignment");req(m.tensor_data_offset%32==0,"offset alignment");
+  auto m=brahma::GgufReader::inspect(p);req(m.version==3,"version");req(m.architecture()=="llama","architecture");req(m.tensors.size()==1,"tensor count");req(m.tensors[0].name=="token_embd.weight","tensor name");req(m.tensors[0].dimensions.size()==2&&m.tensors[0].dimensions[1]==8,"dimensions");req(m.alignment==32,"alignment");req(m.tensor_data_offset%32==0,"offset alignment");\n  TensorInfo q4{"q4_test",{256},12,0};auto q4_layout=tensor_layout(q4,m.tensor_data_offset,m.tensor_data_offset+144);req(q4_layout.elements==256&&q4_layout.bytes==144,"Q4_K payload layout");\n  bool rejected=false;try{TensorInfo bad{"truncated",{256},12,0};(void)tensor_layout(bad,m.tensor_data_offset,m.tensor_data_offset+143);}catch(const std::exception&){rejected=true;}req(rejected,"truncated payload rejection");\n  rejected=false;try{TensorInfo bad{"unknown",{32},999,0};(void)tensor_layout(bad,m.tensor_data_offset,m.tensor_data_offset+4096);}catch(const std::exception&){rejected=true;}req(rejected,"unknown type rejection");
   std::filesystem::remove(p);std::cout<<"GGUF reader tests passed\n";return 0;
  }catch(const std::exception&e){std::filesystem::remove(p);std::cerr<<e.what()<<"\n";return 1;}
 }
