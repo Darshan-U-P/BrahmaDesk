@@ -17,7 +17,7 @@ ctest --test-dir engine/build -C Release --output-on-failure
 - [x] Tensor element-count overflow checks and payload byte sizing for F32, F16, Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, Q8_K and basic integer/f64 types.
 - [x] Tensor payload bounds, alignment, and overlap validation.
 - [x] Synthetic tests for Q4_K block sizing, truncated payload rejection and unknown-type rejection.
-- [ ] Q4_K/Q6_K/Q5_K dequantization kernels and numerical tests.
+- [x] Initial Q4_K block/tensor dequantization implementation with deterministic known-value tests (needs Windows CI and real-model numerical validation).\n- [ ] Q6_K/Q5_K dequantization and broader quantization coverage.
 - [ ] CPU tensor operations and Qwen2 forward pass.
 - [ ] Tokenizer and autoregressive generation.
 - [ ] CUDA kernels and RTX 3050 Ti benchmark.
