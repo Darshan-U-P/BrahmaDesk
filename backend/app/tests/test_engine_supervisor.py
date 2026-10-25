@@ -28,6 +28,9 @@ class FakeBackend:
         self.started = False
         self.stopped = False
         self.generate_calls = 0
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.active_model: str | None = None
 
     async def inspect_model(self, path: Path) -> ModelArtifact:
         if not path.exists():
@@ -43,7 +46,10 @@ class FakeBackend:
 
     async def start(self, model: ModelArtifact, settings: EngineSettings) -> EngineHealth:
         # Simulate a backend that creates an owned resource before startup fails.
+        self.start_calls += 1
         self.started = True
+        self.stopped = False
+        self.active_model = model.model_id
         if self.fail_start:
             raise RuntimeError("simulated startup failure")
         return EngineHealth(
@@ -71,8 +77,10 @@ class FakeBackend:
         yield GenerationChunk(text="world", finished=True, finish_reason="stop")
 
     async def stop(self) -> None:
+        self.stop_calls += 1
         self.stopped = True
         self.started = False
+        self.active_model = None
 
 
 def test_supervisor_start_generate_and_stop(tmp_path: Path) -> None:
@@ -158,3 +166,54 @@ def test_supervisor_rejects_missing_model(tmp_path: Path) -> None:
         assert supervisor.state == EngineState.FAILED
 
     asyncio.run(run())
+
+def test_supervisor_switches_models_through_backend_lifecycle(tmp_path: Path) -> None:
+    async def run() -> None:
+        first_model = tmp_path / "first.gguf"
+        second_model = tmp_path / "second.gguf"
+        first_model.write_bytes(b"GGUF" + b"\\0" * 16)
+        second_model.write_bytes(b"GGUF" + b"\\0" * 16)
+        backend = FakeBackend()
+        supervisor = EngineSupervisor(backend)
+
+        await supervisor.start(first_model, EngineSettings(mode="cpu"))
+        assert supervisor.selected_model is not None
+        assert supervisor.selected_model.path == first_model
+
+        await supervisor.start(second_model, EngineSettings(mode="cpu"))
+        assert supervisor.state == EngineState.READY
+        assert supervisor.selected_model is not None
+        assert supervisor.selected_model.path == second_model
+        assert backend.active_model == second_model.stem
+        assert backend.start_calls == 2
+
+        await supervisor.stop()
+
+    asyncio.run(run())
+
+
+def test_supervisor_can_restart_after_generation_failure(tmp_path: Path) -> None:
+    async def run() -> None:
+        model_path = tmp_path / "recoverable.gguf"
+        model_path.write_bytes(b"GGUF" + b"\\0" * 16)
+        backend = FakeBackend(fail_generate=True)
+        supervisor = EngineSupervisor(backend)
+        settings = EngineSettings(mode="cpu")
+        await supervisor.start(model_path, settings)
+
+        with pytest.raises(EngineError) as exc:
+            _ = [chunk async for chunk in supervisor.generate(GenerationRequest(prompt="Fail once"))]
+        assert exc.value.code == EngineErrorCode.GENERATION_FAILED
+        assert supervisor.state == EngineState.FAILED
+
+        backend.fail_generate = False
+        await supervisor.start(model_path, settings)
+        chunks = [chunk async for chunk in supervisor.generate(GenerationRequest(prompt="Recover"))]
+        assert "".join(chunk.text for chunk in chunks) == "hello world"
+        assert supervisor.state == EngineState.READY
+        assert backend.start_calls == 2
+
+        await supervisor.stop()
+
+    asyncio.run(run())
+
