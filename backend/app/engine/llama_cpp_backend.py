@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import socket
 import subprocess
 import time
@@ -235,10 +236,7 @@ class LlamaCppServerBackend:
             diagnostics={
                 "base_url": self._base_url,
                 "pid": self._process.pid if alive and self._process else None,
-            },
-        )
-
-    async def generate(
+            },    async def generate(
         self, request: GenerationRequest
     ) -> AsyncIterator[GenerationChunk]:
         if not await self._endpoint_ready() or not self._base_url or not self._model:
@@ -247,33 +245,103 @@ class LlamaCppServerBackend:
                 "The owned llama.cpp process is not ready for generation.",
                 "generate",
             )
+
+        payload = {
+            **request.options,
+            "model": self._model.model_id,
+            "messages": request.messages or [
+                {"role": "user", "content": request.prompt}
+            ],
+            "max_tokens": request.max_tokens,
+            "temperature": request.temperature,
+            "stream": request.stream,
+        }
+
         try:
             async with httpx.AsyncClient(timeout=self._request_timeout) as client:
-                response = await client.post(
+                if not request.stream:
+                    response = await client.post(
+                        f"{self._base_url}/v1/chat/completions",
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    choices = data.get("choices") or []
+                    answer = (
+                        choices[0].get("message", {}).get("content", "")
+                        if choices else ""
+                    )
+                    if not isinstance(answer, str) or not answer.strip():
+                        raise ValueError("The model returned no text")
+
+                    yield GenerationChunk(
+                        text=answer,
+                        finished=True,
+                        finish_reason="stop",
+                    )
+                    return
+
+                answer_seen = False
+                async with client.stream(
+                    "POST",
                     f"{self._base_url}/v1/chat/completions",
-                    json={
-                        **request.options,
-                        "model": self._model.model_id,
-                        "messages": [{"role": "user", "content": request.prompt}],
-                        "max_tokens": request.max_tokens,
-                        "temperature": request.temperature,
-                        "stream": False,
-                    },
-                )
-                response.raise_for_status()
-                payload = response.json()
-                choices = payload.get("choices") or []
-                answer = choices[0].get("message", {}).get("content", "") if choices else ""
-                if not isinstance(answer, str) or not answer.strip():
-                    raise ValueError("The model returned no text")
-        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+                    json=payload,
+                    headers={"Accept": "text/event-stream"},
+                ) as response:
+                    response.raise_for_status()
+
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if not data:
+                            continue
+                        if data == "[DONE]":
+                            break
+
+                        event = json.loads(data)
+                        choices = event.get("choices") or []
+                        if not choices:
+                            continue
+
+                        choice = choices[0]
+                        delta = choice.get("delta") or {}
+                        content = delta.get("content", "")
+                        if content:
+                            if not isinstance(content, str):
+                                raise ValueError(
+                                    "The model returned an invalid text chunk"
+                                )
+                            answer_seen = True
+                            yield GenerationChunk(text=content)
+
+                        finish_reason = choice.get("finish_reason")
+                        if finish_reason is not None:
+                            yield GenerationChunk(
+                                text="",
+                                finished=True,
+                                finish_reason=finish_reason,
+                            )
+
+                if not answer_seen:
+                    raise ValueError("The streaming response contained no text")
+
+        except httpx.HTTPError as exc:
             raise EngineError(
                 EngineErrorCode.GENERATION_FAILED,
                 "The owned llama.cpp process failed to generate text.",
                 "generate",
                 {"reason": str(exc)},
             ) from exc
-        yield GenerationChunk(text=answer, finished=True, finish_reason="stop")
+        except (ValueError, KeyError, TypeError) as exc:
+            raise EngineError(
+                EngineErrorCode.GENERATION_FAILED,
+                "The owned llama.cpp process returned an invalid response.",
+                "generate",
+                {"reason": str(exc)},
+            ) from exc
+
+on="stop")
 
     async def stop(self) -> None:
         process = self._process
