@@ -35,6 +35,12 @@ void causal_attention_f32(
     std::size_t head_dim,
     float scale = 0.0f);
 
+// SwiGLU activation: output[i] = SiLU(gate[i]) * up[i].
+void swiglu_f32(
+    std::span<const float> gate,
+    std::span<const float> up,
+    std::span<float> output);
+
 // RMSNorm over the last dimension of each row.
 // input and output have shape [rows, width]; weight has shape [width].
 void rms_norm_f32(
