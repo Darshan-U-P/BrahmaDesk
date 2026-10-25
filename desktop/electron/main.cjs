@@ -114,6 +114,7 @@ function startPackagedBackend() {
       BRAHMA_BACKEND_PORT: String(BACKEND_PORT),
       BRAHMA_SHUTDOWN_TOKEN: SHUTDOWN_TOKEN,
       BRAHMA_DATA_DIR: app.getPath("userData"),
+      BRAHMA_PACKAGED_LLAMA_SERVER_EXE: path.join(process.resourcesPath, "llama-runtime", "llama-server.exe"),
     },
   });
 
