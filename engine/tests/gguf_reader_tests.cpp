@@ -36,8 +36,7 @@ int main(){
   req(rejected,"unknown type rejection");
   std::array<std::uint8_t,144> q4_block{};
   q4_block[0]=0x00;q4_block[1]=0x3c; // fp16 d = 1.0
-  for(std::size_t i=4;i<8;++i)q4_block[i]=1;
-  for(std::size_t i=8;i<12;++i)q4_block[i]=1;
+  for(std::size_t i=4;i<16;++i)q4_block[i]=1; // initialize all 12 packed scale/min bytes
   for(std::size_t i=16;i<144;++i)q4_block[i]=0x11;
   std::array<float,256> decoded{};
   brahma::dequantize_q4_k_block(q4_block,decoded);
