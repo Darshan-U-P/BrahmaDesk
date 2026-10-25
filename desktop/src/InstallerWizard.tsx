@@ -171,7 +171,7 @@ export default function InstallerWizard() {
         </div>
         <div className="installer-gpu-list"><strong>Graphics adapters</strong>{hardware.gpus.length ? hardware.gpus.map((gpu, index) => <div key={gpu.name + "-" + index}><span>{gpu.name}</span><small>{gpu.vram_gb_reported == null ? "VRAM unknown" : gpu.vram_gb_reported + " GB reported VRAM"}</small></div>) : <p>No GPU information was returned by the operating system.</p>}</div>
         <p className="installer-muted">{hardware.os} {hardware.os_release} · Models saved to <code>{hardware.model_directory}</code></p>
-        <p className="installer-disclaimer"><ShieldCheck size={14}/> GPU memory and compatibility are best-effort estimates. The final runtime must be tested with the actual llama.cpp backend.</p>
+        <p className="installer-disclaimer"><ShieldCheck size={14}/> GPU memory and compatibility are estimates. Confirm that the selected model generates a response before relying on performance.</p>
       </>}
     </section>
 
