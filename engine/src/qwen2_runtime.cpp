@@ -247,13 +247,20 @@ std::string Qwen2Runtime::generate(const std::string& prompt, std::size_t max_ne
         "<|im_start|>system\\nYou are a helpful assistant.<|im_end|>\\n"
         "<|im_start|>user\\n" + prompt + "<|im_end|>\\n<|im_start|>assistant\\n";
     auto ids = impl_->tokenizer.encode(formatted);
+    for (auto& cache : impl_->key_cache) cache.clear();
+    for (auto& cache : impl_->value_cache) cache.clear();
+    std::vector<float> current_logits;
+    for (std::size_t i = 0; i < ids.size(); ++i) current_logits = impl_->step(ids[i], i);
     std::vector<std::uint32_t> generated;
     generated.reserve(max_new_tokens);
     for (std::size_t i = 0; i < max_new_tokens; ++i) {
-        const auto next = greedy_next_token(ids);
+        const auto it = std::max_element(current_logits.begin(), current_logits.end());
+        if (it == current_logits.end()) throw std::runtime_error("Model returned empty logits");
+        const auto next = static_cast<std::uint32_t>(std::distance(current_logits.begin(), it));
         if (impl_->tokenizer.has_eos_token() && next == impl_->tokenizer.eos_token_id()) break;
         ids.push_back(next);
         generated.push_back(next);
+        if (i + 1 < max_new_tokens) current_logits = impl_->step(next, ids.size() - 1);
     }
     return impl_->tokenizer.decode(generated, true);
 }
