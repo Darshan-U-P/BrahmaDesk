@@ -20,7 +20,7 @@ ctest --test-dir engine/build -C Release --output-on-failure
 .\engine\build\Release\brahma-engine.exe "C:\path\to\model.gguf" --generate "Explain photosynthesis simply." 16
 ```
 
-The generation command is a first native CPU inference path for Qwen2.5-Instruct GGUF files. It embeds the model's tokenizer vocabulary and merge ranks, uses greedy decoding, and prints generated text. Quote prompts containing spaces in PowerShell. First load may take time and memory because the current implementation decodes supported tensors to float32 and caches them in RAM.
+The generation command is a first native CPU inference path for Qwen2.5-Instruct GGUF files. It embeds the model's tokenizer vocabulary and merge ranks, uses greedy decoding, and prints generated text. Quote prompts containing spaces in PowerShell. First load may take time and memory because the current implementation decodes supported tensors to float32 and caches them in RAM. The CLI also reports prompt-prefill and decode-loop timing to stderr; these timings exclude runtime construction and therefore help separate inference work from initial metadata/model setup. Use total wall-clock timing separately when comparing startup-to-output latency.
 
 ## Current implementation
 
