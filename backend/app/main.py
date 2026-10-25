@@ -632,7 +632,8 @@ async def lifespan(_: FastAPI):
             # Keep the backend and legacy streaming route available so the UI
             # can display a usable startup error and allow runtime reconfiguration.
             print(f"[Brahma Desk] Engine server startup failed: {exc}", flush=True)
-            await start_llama_if_needed()
+            # Keep backend startup available for installer recovery. Do not start
+            # a second legacy process here when the owned Engine adapter failed.
     else:
         await start_llama_if_needed()
     try:
