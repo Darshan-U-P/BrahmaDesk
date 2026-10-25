@@ -13,15 +13,17 @@ ctest --test-dir engine/build -C Release --output-on-failure
 
 ## Tokenizer ID comparison
 
-Brahma can dump IDs produced by its embedded GGUF vocabulary and BPE merges:
+The self-contained tokenizer implements Qwen2/GPT-2-family pre-tokenization with Unicode-aware letter/number and whitespace classification. It remains important to compare it against the exact reference tokenizer for the same GGUF file.
+
+A PowerShell regression script compares Brahma and llama.cpp token IDs for English, digits, C++ punctuation, Kannada, Hindi, newlines, URLs, contractions, and trailing whitespace. From the repository root:
 
 ```powershell
 $model = "$env:APPDATA\brahma-desk\models\Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-$prompt = "Hello, world! How are you?"
-.engine\build\Release\brahma-engine.exe $model --tokenize $prompt
+$ref = "D:\all project\llama-b11552-bin-win-cuda-12.4-x64\llama-tokenize.exe"
+.\engine\scripts\compare-tokenizer.ps1 -ModelPath $model -LlamaTokenizer $ref
 ```
 
-Compare the exact IDs with an independent tokenizer implementation for the *same model and exact text*. A llama.cpp build may provide `llama-tokenize`; check its own `--help` for the supported prompt/output syntax. Save the exact input and both ID sequences when reporting a mismatch. Do not treat a successful encode/decode round-trip or synthetic unit test as proof of Qwen2.5 tokenizer parity: the current self-contained pre-tokenizer is approximate.
+The script uses `--no-bos` for llama.cpp so its output can be compared with Brahma's current no-BOS tokenizer API. A mismatch exits with code 1 and prints both ID sequences. Passing this test suite is evidence for the included strings only, not proof of every Unicode category, special token, or chat-template case. Keep reference comparisons in the regression set when changing tokenizer code.
 
 ## Repeatable inference benchmark
 
@@ -68,7 +70,7 @@ Replace `1,2,3` with token IDs from the same model/tokenizer. Compare with an in
 
 ## Current known limitations
 
-- The Qwen2-family pre-tokenizer is approximate; exact tokenizer parity remains unproven.
+- Unicode-aware Qwen2/GPT-2-family pre-tokenization is implemented, but exact tokenizer parity remains unproven until the model-backed comparison script passes on the target machine.
 - No independent reference-logit comparison is included yet.
 - The profiler is CPU wall-clock instrumentation and adds a small amount of timing overhead.
 - Current prompt prefill is sequential, and the runtime remains CPU-only.
