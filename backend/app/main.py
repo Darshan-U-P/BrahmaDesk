@@ -219,7 +219,10 @@ LLAMA_SERVER_EXE = _default_llama_server_exe()
 
 LLAMA_MODEL_PATH = os.getenv(
     "LLAMA_MODEL_PATH",
-    r"D:\all project\Projects\AI projects\BrahmaDesk\BrahmaDesk-Phase0\Models\Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    str(
+        Path(os.getenv("BRAHMA_MODEL_DIR", str(DATA_DIR / "models"))).expanduser()
+        / "Qwen3-4B-Q4_K_M.gguf"
+    ),
 )
 
 LLAMA_HOST = os.getenv("LLAMA_HOST", "127.0.0.1")
@@ -638,9 +641,17 @@ async def start_engine_v1(*, force_owned: bool = False) -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global engine_v1_supervisor
-    await load_saved_llama_server_path()
-    if ENGINE_V1_ENABLED:
+    global engine_v1_supervisor, llama_start_error
+    model_configured = await load_saved_llama_server_path()
+    if not model_configured:
+        # The desktop UI and installer API must remain usable on a clean install.
+        # Model setup is a separate state from API/backend readiness.
+        llama_start_error = (
+            "No model is configured. Open Model Setup to download and configure a GGUF model."
+        )
+        engine_v1_supervisor = None
+        print(f"[Brahma Desk] {llama_start_error}", flush=True)
+    elif ENGINE_V1_ENABLED:
         try:
             await start_engine_v1()
         except Exception as exc:
@@ -694,33 +705,56 @@ else:  # Existing tests import this module as top-level "main".
 app.include_router(installer_router)
 
 
-async def load_saved_llama_server_path() -> None:
-    """Restore the selected runtime and verified model configuration before startup."""
-    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, LLAMA_LOAD_MODE, MODEL_ID
+async def load_saved_llama_server_path() -> bool:
+    """Restore only a valid runtime/model selection; clean installs need setup."""
+    global LLAMA_SERVER_EXE, LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS
+    global LLAMA_GPU_LAYERS, LLAMA_LOAD_MODE, MODEL_ID
+
+    configured_model = bool(
+        os.getenv("LLAMA_MODEL_PATH")
+        and Path(os.getenv("LLAMA_MODEL_PATH", "")).expanduser().is_file()
+    )
     try:
         if __package__:
             from . import installer as installer_service
         else:
             import installer as installer_service
+
         installer_service._registry_init()
-        with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
-            row = db.execute(
-                "SELECT value_json FROM installer_settings WHERE key='runtime_executable'"
-            ).fetchone()
-        if row:
-            saved = json.loads(row[0])
-            candidate = Path(saved.get("path", "")).expanduser()
-            if candidate.is_file() and candidate.name.casefold() == "llama-server.exe":
-                LLAMA_SERVER_EXE = str(candidate.resolve())
+
+        # Electron supplies the bundled runtime in packaged builds. Prefer it
+        # over any runtime path saved on another machine or in an older install.
+        packaged_runtime = Path(
+            os.getenv("BRAHMA_PACKAGED_LLAMA_SERVER_EXE", "")
+        ).expanduser()
+        if packaged_runtime.is_file():
+            LLAMA_SERVER_EXE = str(packaged_runtime.resolve())
+        else:
+            with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
+                row = db.execute(
+                    "SELECT value_json FROM installer_settings WHERE key='runtime_executable'"
+                ).fetchone()
+            if row:
+                saved = json.loads(row[0])
+                candidate = Path(saved.get("path", "")).expanduser()
+                if candidate.is_file() and candidate.name.casefold() == "llama-server.exe":
+                    LLAMA_SERVER_EXE = str(candidate.resolve())
+
         with sqlite3.connect(installer_service.REGISTRY_DB, timeout=10) as db:
             row = db.execute(
                 "SELECT value_json FROM installer_settings WHERE key='inference'"
             ).fetchone()
+
         if row:
             config = json.loads(row[0])
             registered = installer_service._registry_rows().get(config.get("model_id"))
             model_path = Path(config.get("model_path", "")).expanduser()
-            if registered and registered.get("verified") and model_path.is_file() and str(model_path.resolve()) == str(Path(registered["path"]).resolve()):
+            if (
+                registered
+                and registered.get("verified")
+                and model_path.is_file()
+                and str(model_path.resolve()) == str(Path(registered["path"]).resolve())
+            ):
                 LLAMA_MODEL_PATH = str(model_path.resolve())
                 LLAMA_CONTEXT_SIZE = int(config.get("context_size", LLAMA_CONTEXT_SIZE))
                 LLAMA_THREADS = int(config.get("threads", LLAMA_THREADS))
@@ -729,10 +763,12 @@ async def load_saved_llama_server_path() -> None:
                 if saved_mode in {"auto", "cpu", "hybrid", "gpu"}:
                     LLAMA_LOAD_MODE = saved_mode
                 MODEL_ID = str(config.get("model_id", MODEL_ID))
-    except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
-        # Keep the environment/default path if no valid saved runtime is available.
-        return
+                configured_model = True
 
+        return configured_model
+    except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
+        # Invalid or missing setup is recoverable; do not block the installer UI.
+        return False
 
 # ---------------------------------------------------------------------------
 # Health endpoint
