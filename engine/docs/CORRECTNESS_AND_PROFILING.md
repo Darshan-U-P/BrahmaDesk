@@ -66,8 +66,8 @@ Replace `1,2,3` with token IDs from the same model/tokenizer. Compare with an in
 
 ## Current known limitations
 
-- Unicode-aware Qwen2/GPT-2-family pre-tokenization is implemented, but exact tokenizer parity remains unproven until the model-backed comparison script passes on the target machine.
-- No independent reference-logit comparison is included yet.
+- Unicode-aware Qwen2/GPT-2-family pre-tokenization passed the nine selected model-backed parity cases on the user's machine; broader tokenizer coverage is still unproven.
+- Full-vector independent reference-logit comparison is not yet available; the top-1 and top-N checks are partial diagnostics.
 - The profiler is CPU wall-clock instrumentation and adds a small amount of timing overhead.
 - Current prompt prefill is sequential, and the runtime remains CPU-only.
 
