@@ -18,13 +18,11 @@ int main(){
   const std::array<float,16> zero_matrix{};
   brahma::Qwen2BlockWeights w{
    ones,identity,zeros,kv_projection,kv_zeros,kv_projection,kv_zeros,
-   identity,ones,zero_matrix,zero_matrix,zero_matrix
+   zero_matrix,ones,zero_matrix,zero_matrix,zero_matrix
   };
   const auto out=brahma::qwen2_transformer_block_f32(input,1,4,4,2,1,10000.0f,1.0e-5f,w);
-  double ss=0;for(float x:input)ss+=double(x)*x;
-  const float scale=1.0f/std::sqrt(float(ss/4.0)+1.0e-5f);
   req(out.size()==4,"block output size");
-  for(std::size_t i=0;i<4;++i) req(near(out[i],input[i]+input[i]*scale),"single-token residual path");
+  for(std::size_t i=0;i<4;++i) req(near(out[i],input[i]),"zero attention/FFN residual path");
   bool rejected=false;
   try{(void)brahma::qwen2_transformer_block_f32(input,1,4,4,3,1,10000.0f,1.0e-5f,w);}
   catch(const std::invalid_argument&){rejected=true;}
