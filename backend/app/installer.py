@@ -472,17 +472,28 @@ async def scan_local_models() -> dict[str, Any]:
     discovered = []
     rejected = []
     candidates: dict[str, Path] = {}
-    # Scan the managed model folder plus common user model locations. Never
-    # recursively scan whole drives; skip inaccessible paths and duplicate roots.
-    roots = [
-        MODEL_DIR,
-        Path.home() / "Models",
-        Path.home() / "models",
-        Path.home() / "Downloads",
-        Path.home() / "Documents" / "Models",
-        Path(os.getenv("USERPROFILE", str(Path.home()))) / "models",
-        Path(os.getenv("USERPROFILE", str(Path.home()))) / "Downloads",
-    ]
+    # A clean install consumes this one-shot marker and deliberately ignores
+    # unrelated local GGUF files on the first scan, ensuring the recommended
+    # model is downloaded fresh instead of reusing a previous model.
+    clean_marker = DATA_DIR / "clean-install-pending.json"
+    clean_first_scan = clean_marker.is_file()
+    if clean_first_scan:
+        try:
+            clean_marker.unlink()
+        except OSError:
+            pass
+
+    # Never recursively scan whole drives; skip inaccessible paths and duplicate roots.
+    roots = [MODEL_DIR]
+    if not clean_first_scan:
+        roots.extend([
+            Path.home() / "Models",
+            Path.home() / "models",
+            Path.home() / "Downloads",
+            Path.home() / "Documents" / "Models",
+            Path(os.getenv("USERPROFILE", str(Path.home()))) / "models",
+            Path(os.getenv("USERPROFILE", str(Path.home()))) / "Downloads",
+        ])
     seen_roots: set[str] = set()
     for root in roots:
         try:
@@ -500,8 +511,9 @@ async def scan_local_models() -> dict[str, Any]:
                             candidates[str(path.resolve()).casefold()] = path
         except OSError:
             continue
-    for path in _running_llama_model_paths():
-        candidates[str(path.resolve()).casefold()] = path
+    if not clean_first_scan:
+        for path in _running_llama_model_paths():
+            candidates[str(path.resolve()).casefold()] = path
     for path in candidates.values():
         if str(path.resolve()).casefold() in catalog_paths:
             continue
