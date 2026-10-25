@@ -74,17 +74,41 @@ def test_cpu_plan_reports_zero_estimated_vram(tmp_path: Path) -> None:
     assert plan.estimated_vram_gb == 0.0
 
 
-def test_default_auto_gpu_offload_is_conservative(tmp_path: Path) -> None:
-    model = tmp_path / "valid.gguf"
-    model.write_bytes(b"GGUF" + b"x" * 1024)
+def test_build_command_forces_cpu_mode_offload_to_zero(tmp_path: Path) -> None:
     executable = tmp_path / "llama-server.exe"
     executable.write_bytes(b"placeholder")
+    model = type("Model", (), {"model_id": "model", "path": tmp_path / "model.gguf"})()
     backend = LlamaCppServerBackend(executable)
-    artifact = asyncio.run(backend.inspect_model(model))
 
-    plan = asyncio.run(backend.plan(artifact, EngineSettings(context_size=2048, mode="auto")))
+    command = backend._build_command(model, EngineSettings(context_size=2048, mode="cpu", gpu_layers=999))
 
-    assert plan.selected_mode == "auto"
+    assert command[command.index("-ngl") + 1] == "0"
+    assert command[command.index("-m") + 1] == str(model.path)
+
+
+def test_build_command_uses_configured_gpu_layer_budget(tmp_path: Path) -> None:
+    executable = tmp_path / "llama-server.exe"
+    executable.write_bytes(b"placeholder")
+    model = type("Model", (), {"model_id": "model", "path": tmp_path / "model.gguf"})()
+    backend = LlamaCppServerBackend(executable)
+
+    command = backend._build_command(
+        model,
+        EngineSettings(context_size=2048, mode="hybrid", gpu_layers=12),
+    )
+
+    assert command[command.index("-ngl") + 1] == "12"
+
+
+def test_build_command_uses_conservative_auto_default(tmp_path: Path) -> None:
+    executable = tmp_path / "llama-server.exe"
+    executable.write_bytes(b"placeholder")
+    model = type("Model", (), {"model_id": "model", "path": tmp_path / "model.gguf"})()
+    backend = LlamaCppServerBackend(executable)
+
+    command = backend._build_command(model, EngineSettings(context_size=2048, mode="auto"))
+
+    assert command[command.index("-ngl") + 1] == "20"
 
 
 def test_stop_does_not_touch_process_when_none_is_owned(tmp_path: Path) -> None:
