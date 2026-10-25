@@ -18,7 +18,8 @@ void print_usage() {
         << "  brahma-engine <model.gguf>\n"
         << "  brahma-engine <model.gguf> --list-tensors\n"
         << "  brahma-engine <model.gguf> --validate-qwen2\n"
-        << "Brahma Engine Core: GGUF inspection and tensor payload validation; inference is not implemented yet.\n";
+        << "  brahma-engine <model.gguf> --generate \"prompt\" [max-new-tokens]\n"
+        << "Native Qwen2 CPU inference supports F32, F16, Q4_K and Q6_K tensors.\n";
 }
 
 void print_tensor_list(const brahma::TensorRegistry& registry) {
@@ -40,17 +41,13 @@ void print_tensor_list(const brahma::TensorRegistry& registry) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2 || argc > 5) {
-        print_usage();
-        return 2;
-    }
-
+    if (argc < 2 || argc > 5) { print_usage(); return 2; }
     const std::string mode = argc >= 3 ? argv[2] : "";
     if (mode == "--generate") {
         if (argc != 4 && argc != 5) { print_usage(); return 2; }
-    } else if ((argc != 2 && argc != 3) || (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2")) {
-        print_usage();
-        return 2;
+    } else if ((argc != 2 && argc != 3) ||
+               (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2")) {
+        print_usage(); return 2;
     }
 
     try {
@@ -58,10 +55,10 @@ int main(int argc, char** argv) {
         brahma::TensorRegistry registry(std::move(model), argv[1]);
 
         if (mode == "--generate") {
-            const auto max_tokens = argc == 5 ? static_cast<std::size_t>(std::stoull(argv[4])) : 32u;
-            if (max_tokens > 4096) throw std::runtime_error("max-new-tokens must not exceed 4096");
+            const auto parsed = argc == 5 ? std::stoull(argv[4]) : 32ULL;
+            if (parsed > 4096) throw std::runtime_error("max-new-tokens must not exceed 4096");
             brahma::Qwen2Runtime runtime(argv[1]);
-            std::cout << runtime.generate(argv[3], max_tokens) << "\\n";
+            std::cout << runtime.generate(argv[3], static_cast<std::size_t>(parsed)) << "\n";
             return 0;
         }
         if (mode == "--list-tensors") {
@@ -85,14 +82,11 @@ int main(int argc, char** argv) {
         std::uint64_t total = 0;
         for (const auto& tensor : registry.model().tensors) {
             const auto bytes = registry.layout(tensor.name).bytes;
-            if (bytes > UINT64_MAX - total) {
-                throw std::runtime_error("Total tensor byte count overflow");
-            }
+            if (bytes > UINT64_MAX - total) throw std::runtime_error("Total tensor byte count overflow");
             total += bytes;
         }
-
         const auto& info = registry.model();
-        std::cout << "Brahma Engine Core 0.3\n"
+        std::cout << "Brahma Engine Core 0.4\n"
                   << "GGUF version: " << info.version << "\n"
                   << "Architecture: " << (info.architecture().empty() ? "(not declared)" : info.architecture()) << "\n"
                   << "Metadata entries: " << info.metadata.size() << "\n"
@@ -102,7 +96,7 @@ int main(int argc, char** argv) {
                   << "Vocabulary entries: " << info.vocabulary_size() << "\n"
                   << "Payload validation: PASS\n"
                   << "Validated tensor payload bytes: " << total << "\n"
-                  << "Inference: NOT IMPLEMENTED\n";
+                  << "Inference: use --generate for native Qwen2 generation\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Brahma Engine error: " << error.what() << "\n";
