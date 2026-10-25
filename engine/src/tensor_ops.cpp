@@ -70,7 +70,7 @@ void rope_f32(
     std::size_t sequence_length,
     std::size_t head_dim,
     std::size_t position_offset,
-    float theta) {
+    float theta,\n    RopeLayout layout) {
     const auto total = checked_product(sequence_length, head_dim, "RoPE shape overflow");
     if (head_dim == 0 || head_dim % 2 != 0 || values.size() != total) {
         throw std::invalid_argument("RoPE requires an even head dimension and matching input size");
@@ -90,10 +90,13 @@ void rope_f32(
                 std::pow(theta, exponent);
             const float cs = std::cos(angle);
             const float sn = std::sin(angle);
-            const float x0 = values[row + pair * 2];
-            const float x1 = values[row + pair * 2 + 1];
-            values[row + pair * 2] = x0 * cs - x1 * sn;
-            values[row + pair * 2 + 1] = x0 * sn + x1 * cs;
+            const auto i0 = layout == RopeLayout::NeoX ? row + pair : row + pair * 2;
+            const auto i1 = layout == RopeLayout::NeoX
+                ? row + pair + head_dim / 2 : row + pair * 2 + 1;
+            const float x0 = values[i0];
+            const float x1 = values[i1];
+            values[i0] = x0 * cs - x1 * sn;
+            values[i1] = x0 * sn + x1 * cs;
         }
     }
 }
