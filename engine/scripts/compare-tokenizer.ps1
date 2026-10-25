@@ -35,7 +35,7 @@ foreach ($text in $cases) {
     Write-Host "===== $text ====="
 
     # Pass UTF-8 bytes as ASCII hex to avoid Windows PowerShell native-argument code-page conversion.
-    $utf8Hex = [Convert]::ToHexString([System.Text.Encoding]::UTF8.GetBytes($text))
+    $utf8Hex = [BitConverter]::ToString([System.Text.Encoding]::UTF8.GetBytes($text)).Replace("-", "")
     $brahmaOutput = & $BrahmaExe $ModelPath --tokenize-utf8-hex $utf8Hex 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Brahma tokenizer failed for input: $text. Output: $brahmaOutput"
