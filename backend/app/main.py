@@ -22,12 +22,12 @@ from pydantic import BaseModel, Field, field_validator
 
 try:
     if __package__:
-        from .engine import EngineError, EngineSettings, EngineSupervisor, GenerationRequest, LlamaCppServerBackend
+        from .engine import EngineError, EngineSettings, EngineSupervisor, GenerationRequest, LlamaCppServerBackend, BrahmaNativeBackend
     else:
-        from engine import EngineError, EngineSettings, EngineSupervisor, GenerationRequest, LlamaCppServerBackend
+        from engine import EngineError, EngineSettings, EngineSupervisor, GenerationRequest, LlamaCppServerBackend, BrahmaNativeBackend
 except ImportError:
     EngineError = EngineSettings = EngineSupervisor = None  # type: ignore[assignment]
-    GenerationRequest = LlamaCppServerBackend = None  # type: ignore[assignment]
+    GenerationRequest = LlamaCppServerBackend = BrahmaNativeBackend = None  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +208,12 @@ LLAMA_BASE_URL = os.getenv(
 LLAMA_SERVER_EXE = os.getenv(
     "LLAMA_SERVER_EXE",
     r"D:\all project\llama-b11552-bin-win-cuda-12.4-x64\llama-server.exe",
+)
+
+# Native Brahma Engine CLI. Relative to the repository root in development.
+BRAHMA_ENGINE_EXE = os.getenv(
+    "BRAHMA_ENGINE_EXE",
+    str(APP_DIR.parent / "engine" / "build-llama" / "bin" / "Release" / "brahma-engine.exe"),
 )
 
 LLAMA_MODEL_PATH = os.getenv(
@@ -582,24 +588,34 @@ def _engine_v1_mode() -> str:
 
 
 async def start_engine_v1() -> None:
-    """Start Engine v1's owned llama.cpp runtime using the selected local model."""
+    """Configure the native Brahma Engine CLI with the selected local GGUF model."""
     global engine_v1_supervisor
-    if EngineSupervisor is None or LlamaCppServerBackend is None or EngineSettings is None:
-        raise RuntimeError("Engine v1 modules are unavailable in this installation")
+    if EngineSupervisor is None or BrahmaNativeBackend is None or EngineSettings is None:
+        raise RuntimeError("Native Brahma Engine modules are unavailable in this installation")
     try:
-        gpu_layers: int | None = max(0, int(LLAMA_GPU_LAYERS))
+        # The checked-in build-llama directory currently contains the CPU GGML
+        # runtime, so native inference defaults to zero GPU layers.
+        gpu_layers = max(0, int(os.getenv("BRAHMA_ENGINE_GPU_LAYERS", "0")))
     except (TypeError, ValueError):
-        gpu_layers = None
+        gpu_layers = 0
     supervisor = EngineSupervisor(
-        LlamaCppServerBackend(Path(LLAMA_SERVER_EXE).expanduser(), startup_timeout=LLAMA_STARTUP_TIMEOUT)
+        BrahmaNativeBackend(Path(BRAHMA_ENGINE_EXE).expanduser())
     )
     await supervisor.start(
         Path(LLAMA_MODEL_PATH).expanduser(),
-        EngineSettings(context_size=LLAMA_CONTEXT_SIZE, mode=_engine_v1_mode(),
-                       threads=max(1, LLAMA_THREADS), gpu_layers=gpu_layers),
+        EngineSettings(
+            context_size=LLAMA_CONTEXT_SIZE,
+            mode="cpu" if gpu_layers == 0 else _engine_v1_mode(),
+            threads=max(1, LLAMA_THREADS),
+            gpu_layers=gpu_layers,
+        ),
     )
     engine_v1_supervisor = supervisor
-    print("[Brahma Desk] Engine v1 is ready (owned llama.cpp runtime).", flush=True)
+    print(
+        "[Brahma Desk] Native Brahma Engine is ready "
+        "(CLI backend; model loads per generation).",
+        flush=True,
+    )
 
 
 @asynccontextmanager
@@ -709,6 +725,27 @@ async def health() -> dict[str, Any]:
         "startup_error": llama_start_error,
     }
 
+    if ENGINE_V1_ENABLED and engine_v1_supervisor is not None:
+        engine_health = await engine_v1_supervisor.health()
+        diagnostics = engine_health.diagnostics or {}
+        # Keep llama_server="ok" for existing frontend/E2E compatibility; the
+        # engine field identifies that the native CLI, not an HTTP server, is active.
+        status["llama_server"] = "ok" if engine_health.generation_ready else "unreachable"
+        status["llama_base_url"] = None
+        status["model"] = engine_health.model_id
+        status["managed_by_backend"] = False
+        status["llama_process_running"] = False
+        status["startup_error"] = engine_health.message
+        status["inference_runtime"] = "brahma-native-cli"
+        status["engine"] = {
+            "state": engine_health.state.value,
+            "backend": engine_health.backend,
+            "generation_ready": engine_health.generation_ready,
+            "process_owned": engine_health.process_owned,
+            "diagnostics": diagnostics,
+        }
+        return status
+
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(f"{LLAMA_BASE_URL}/v1/models")
@@ -724,6 +761,7 @@ async def health() -> dict[str, Any]:
     except (httpx.HTTPError, ValueError):
         pass
 
+    status["inference_runtime"] = "llama.cpp-server"
     return status
 
 
