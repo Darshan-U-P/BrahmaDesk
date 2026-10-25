@@ -66,3 +66,21 @@ def test_engine_states_are_explicit() -> None:
     assert {state.value for state in EngineState} == {
         "stopped", "starting", "ready", "generating", "stopping", "failed"
     }
+
+
+
+def test_generation_request_supports_full_messages_and_streaming() -> None:
+    request = GenerationRequest(
+        prompt="fallback prompt",
+        messages=[
+            {"role": "system", "content": "Be concise."},
+            {"role": "user", "content": "Hello"},
+        ],
+        stream=True,
+    )
+
+    assert request.messages == [
+        {"role": "system", "content": "Be concise."},
+        {"role": "user", "content": "Hello"},
+    ]
+    assert request.stream is True
