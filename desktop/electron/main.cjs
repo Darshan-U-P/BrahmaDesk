@@ -128,6 +128,7 @@ function startPackagedBackend() {
       BRAHMA_SHUTDOWN_TOKEN: SHUTDOWN_TOKEN,
       BRAHMA_DATA_DIR: app.getPath("userData"),
       BRAHMA_PACKAGED_LLAMA_SERVER_EXE: path.join(process.resourcesPath, "llama-runtime", "llama-server.exe"),
+      BRAHMA_BUNDLED_MODEL_PATH: path.join(process.resourcesPath, "bundled-model", "Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
     },
   });
 
