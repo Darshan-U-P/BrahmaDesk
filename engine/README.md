@@ -19,7 +19,8 @@ ctest --test-dir engine/build -C Release --output-on-failure
 - [x] Synthetic tests for Q4_K block sizing, truncated payload rejection and unknown-type rejection.
 - [x] Initial Q4_K block/tensor dequantization implementation with deterministic known-value tests (needs Windows CI and real-model numerical validation).\n- [ ] Q6_K/Q5_K dequantization and broader quantization coverage.
 - [x] Initial CPU float32 matrix multiplication and RMSNorm with unit tests.
-- [ ] RoPE, attention, feed-forward and Qwen2 forward pass.
+- [x] Initial adjacent-pair RoPE and single-sequence causal attention primitives with unit tests.
+- [ ] Qwen2 feed-forward and complete transformer forward pass.
 - [ ] Tokenizer and autoregressive generation.
 - [ ] CUDA kernels and RTX 3050 Ti benchmark.
 - [ ] Brahma Desk native-runtime adapter and accurate health status.
