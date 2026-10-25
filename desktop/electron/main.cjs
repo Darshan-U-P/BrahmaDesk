@@ -458,6 +458,88 @@ function configureUpdater() {
 
 
 // ---------------------------------------------------------------------------
+// First-launch installation choice
+// ---------------------------------------------------------------------------
+
+function installationStatePath() {
+  return path.join(app.getPath("appData"), "brahma-desk-install-state.json");
+}
+
+function readInstallationState() {
+  try {
+    return JSON.parse(fs.readFileSync(installationStatePath(), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function writeInstallationState(state) {
+  const target = installationStatePath();
+  const temporary = target + ".tmp";
+  fs.writeFileSync(temporary, JSON.stringify(state, null, 2), "utf8");
+  fs.renameSync(temporary, target);
+}
+
+async function chooseInstallationMode() {
+  if (!app.isPackaged) return true;
+
+  const version = app.getVersion();
+  const state = readInstallationState();
+  if (state.promptedVersion === version) return true;
+
+  const choice = await dialog.showMessageBox({
+    type: "question",
+    title: "Set up Brahma Desk",
+    message: "Choose how Brahma Desk should start.",
+    detail:
+      "Standard installation keeps your existing conversations, profiles, settings, and downloaded models. " +
+      "Clean installation removes Brahma Desk user data and managed downloaded models, then starts fresh setup with a new recommended model download.",
+    buttons: ["Standard installation", "Clean installation", "Cancel setup"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  });
+
+  if (choice.response === 2) return false;
+
+  if (choice.response === 1) {
+    const confirmation = await dialog.showMessageBox({
+      type: "warning",
+      title: "Confirm clean installation",
+      message: "Permanently delete Brahma Desk's local data?",
+      detail:
+        "This deletes local conversations, profiles, settings, memories, model registry/configuration, and models downloaded into Brahma Desk's managed model folder. " +
+        "It does not delete GGUF files in unrelated folders or files outside Brahma Desk's data directory. This cannot be undone.",
+      buttons: ["Delete data and continue", "Go back"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (confirmation.response !== 0) return false;
+
+    const dataDir = path.resolve(app.getPath("userData"));
+    const expectedDataDir = path.resolve(path.join(app.getPath("appData"), "brahma-desk"));
+    if (dataDir !== expectedDataDir || dataDir === path.parse(dataDir).root) {
+      throw new Error("Refusing to clean an unexpected data directory: " + dataDir);
+    }
+
+    // Backend has not started yet. Remove only Brahma Desk's managed user-data directory.
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataDir, "clean-install-pending.json"),
+      JSON.stringify({ createdAt: new Date().toISOString(), version }),
+      "utf8"
+    );
+    log("Clean installation selected; Brahma Desk user data and managed models were reset.");
+  }
+
+  writeInstallationState({ promptedVersion: version, selectedMode: choice.response === 1 ? "clean" : "standard" });
+  return true;
+}
+
+
+// ---------------------------------------------------------------------------
 // Application startup
 // ---------------------------------------------------------------------------
 
