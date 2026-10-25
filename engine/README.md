@@ -26,7 +26,7 @@ The `--list-tensors` mode prints each validated tensor's name, dimensions, GGML 
 - [x] Initial Q6_K block/tensor dequantization with deterministic scalar-oracle tests; independent comparison against a trusted external implementation remains pending.\n- [ ] Q5_K dequantization and broader quantization coverage.
 - [x] Initial CPU float32 matrix multiplication, RMSNorm, SwiGLU activation, and elementwise addition with unit tests.
 - [x] Initial RoPE (interleaved and NeoX layouts) and single-sequence causal attention primitives with unit tests.
-- [x] Qwen2 tensor-schema validation for required standard tensor names, dimensions, layer count and key metadata.\n- [ ] GQA-aware attention and complete transformer-block forward pass.
+- [x] Qwen2 tensor-schema validation for required standard tensor names, dimensions, layer count and key metadata.\n- [x] Initial float32 Qwen2 transformer-block forward pass with grouped-query attention and synthetic tests; real quantized-weight integration and reference parity remain pending.
 - [ ] Tokenizer and autoregressive generation.
 - [ ] CUDA kernels and RTX 3050 Ti benchmark.
 - [ ] Brahma Desk native-runtime adapter and accurate health status.
