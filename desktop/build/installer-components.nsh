@@ -1,3 +1,5 @@
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
 !include "nsDialogs.nsh"
 
 !macro customHeader
@@ -74,11 +76,13 @@ Function BrahmaComponentsPageLeave
   ${NSD_GetState} $BrahmaModelLaterControl $BrahmaDownloadModelLater
 
   ${If} $BrahmaLlamaServerPath != ""
-    IfFileExists "$BrahmaLlamaServerPath" +2 0
+    IfFileExists "$BrahmaLlamaServerPath" +3 0
+      MessageBox MB_ICONEXCLAMATION "The selected llama-server.exe path does not exist."
       Abort
   ${EndIf}
   ${If} $BrahmaModelPath != ""
-    IfFileExists "$BrahmaModelPath" +2 0
+    IfFileExists "$BrahmaModelPath" +3 0
+      MessageBox MB_ICONEXCLAMATION "The selected GGUF model path does not exist."
       Abort
   ${EndIf}
 
