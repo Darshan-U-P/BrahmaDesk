@@ -582,46 +582,45 @@ def _engine_v1_mode() -> str:
 
 
 async def start_engine_v1() -> None:
-    """Start the owned standard llama.cpp runtime using the selected local model."""
+    """Start a server-owned supervisor, unless a standard server is already available."""
     global engine_v1_supervisor, LLAMA_BASE_URL
     if EngineSupervisor is None or LlamaCppServerBackend is None or EngineSettings is None:
-        raise RuntimeError("Engine v1 modules are unavailable in this installation")
+        raise RuntimeError("llama.cpp server adapter modules are unavailable in this installation")
+
+    if await llama_is_ready():
+        # Do not attach EngineSupervisor to a server process it did not launch.
+        print(
+            f"[Brahma Desk] Reusing existing llama.cpp HTTP endpoint at {LLAMA_BASE_URL}.",
+            flush=True,
+        )
+        engine_v1_supervisor = None
+        return
+
+    executable = Path(LLAMA_SERVER_EXE).expanduser()
+    model_path = Path(LLAMA_MODEL_PATH).expanduser()
     try:
         gpu_layers: int | None = max(0, int(LLAMA_GPU_LAYERS))
     except (TypeError, ValueError):
         gpu_layers = None
-    executable = Path(LLAMA_SERVER_EXE).expanduser()
-    model_path = Path(LLAMA_MODEL_PATH).expanduser()
-
-    # If another compatible llama-server already responds on LLAMA_BASE_URL,
-    # respect that external server and keep it external (never stop it).
-    # The Engine v1 adapter starts its own server on an allocated port only
-    # when no server is already available at the configured endpoint.
-    if await llama_is_ready():
-        # Do not attach the Engine supervisor to an external process.
-        # It remains under the existing legacy HTTP streaming route.
-        print(
-            f"[Brahma Desk] Existing llama.cpp endpoint detected at {LLAMA_BASE_URL}; "
-            "leaving it external and using the standard HTTP streaming path.",
-            flush=True,
-        )
-        return
 
     supervisor = EngineSupervisor(
         LlamaCppServerBackend(executable, startup_timeout=LLAMA_STARTUP_TIMEOUT)
     )
     await supervisor.start(
         model_path,
-        EngineSettings(context_size=LLAMA_CONTEXT_SIZE, mode=_engine_v1_mode(),
-                       threads=max(1, LLAMA_THREADS), gpu_layers=gpu_layers),
+        EngineSettings(
+            context_size=LLAMA_CONTEXT_SIZE,
+            mode=_engine_v1_mode(),
+            threads=max(1, LLAMA_THREADS),
+            gpu_layers=gpu_layers,
+        ),
     )
     engine_v1_supervisor = supervisor
-    # Expose the owned server's randomly assigned port to the existing chat API.
     health = await supervisor.health()
     endpoint = health.diagnostics.get("base_url")
     if endpoint:
         LLAMA_BASE_URL = str(endpoint)
-    print("[Brahma Desk] llama.cpp server is ready (owned standard runtime).", flush=True)
+    print("[Brahma Desk] Standard llama.cpp server is ready.", flush=True)
 
 
 @asynccontextmanager
@@ -631,17 +630,10 @@ async def lifespan(_: FastAPI):
         try:
             await start_engine_v1()
         except Exception as exc:
-            # Keep the backend and legacy streaming route available so the UI
-            # can display a usable startup error and allow runtime reconfiguration.
-            print(f"[Brahma Desk] Engine server startup failed: {exc}", flush=True)
-            # Leave the backend available for runtime reconfiguration and let
-            # /api/health expose the startup failure; do not start a second process.
+            # Keep FastAPI alive so the user can select a valid runtime/model from
+            # the UI; do not silently launch a second legacy server.
+            print(f"[Brahma Desk] llama.cpp startup failed: {exc}", flush=True)
             engine_v1_supervisor = None
-            if await llama_is_ready():
-                print(
-                    f"[Brahma Desk] Existing llama.cpp endpoint is available at {LLAMA_BASE_URL}.",
-                    flush=True,
-                )
     else:
         await start_llama_if_needed()
     try:
@@ -652,10 +644,10 @@ async def lifespan(_: FastAPI):
             try:
                 await engine_v1_supervisor.stop()
             except Exception as exc:
-                print(f"[Brahma Desk] Engine server shutdown error: {exc}", flush=True)
+                print(f"[Brahma Desk] llama.cpp shutdown error: {exc}", flush=True)
             finally:
                 engine_v1_supervisor = None
-        if not ENGINE_V1_ENABLED:
+        elif not ENGINE_V1_ENABLED:
             async with shutdown_lock:
                 try:
                     stop_owned_llama()
