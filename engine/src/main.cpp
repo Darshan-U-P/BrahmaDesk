@@ -10,6 +10,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <sstream>
+#include <vector>
 #include <utility>
 
 namespace {
@@ -21,6 +23,7 @@ void print_usage() {
         << "  brahma-engine <model.gguf> --validate-qwen2\n"
         << "  brahma-engine <model.gguf> --generate \"prompt\" [max-new-tokens]\n"
         << "  brahma-engine <model.gguf> --tokenize \"text\"\n"
+        << "  brahma-engine <model.gguf> --logits \"id,id,id\"\n"
         << "Native Qwen2 CPU inference supports F32, F16, Q4_K and Q6_K tensors.\n";
 }
 
@@ -45,16 +48,31 @@ void print_tensor_list(const brahma::TensorRegistry& registry) {
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 5) { print_usage(); return 2; }
     const std::string mode = argc >= 3 ? argv[2] : "";
-    if (mode == "--generate" || mode == "--tokenize") {
-        if ((mode == "--generate" && argc != 4 && argc != 5) || (mode == "--tokenize" && argc != 4)) { print_usage(); return 2; }
+    if (mode == "--generate" || mode == "--tokenize" || mode == "--logits") {
+        if ((mode == "--generate" && argc != 4 && argc != 5) || ((mode == "--tokenize" || mode == "--logits") && argc != 4)) { print_usage(); return 2; }
     } else if ((argc != 2 && argc != 3) ||
                (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2")) {
         print_usage(); return 2;
     }
 
     try {
-        if (mode == "--tokenize") {
+        if (mode == "--tokenize" || mode == "--logits") {
             brahma::Qwen2Runtime runtime(argv[1]);
+            if (mode == "--logits") {
+                std::vector<std::uint32_t> ids;
+                std::stringstream input(argv[3]);
+                std::string part;
+                while (std::getline(input, part, ',')) {
+                    if (part.empty()) throw std::runtime_error("Empty token ID in --logits list");
+                    const auto value = std::stoull(part);
+                    if (value > UINT32_MAX) throw std::runtime_error("Token ID exceeds uint32 range");
+                    ids.push_back(static_cast<std::uint32_t>(value));
+                }
+                const auto values = runtime.logits(ids);
+                std::cout.precision(9);
+                for (std::size_t i = 0; i < values.size(); ++i) std::cout << i << ',' << values[i] << '\\n';
+                return 0;
+            }
             const auto ids = runtime.tokenize(argv[3]);
             std::cout << "Tokenizer IDs (" << ids.size() << " tokens):";
             for (const auto id : ids) std::cout << ' ' << id;
