@@ -1,6 +1,7 @@
 #pragma once
 #include "brahma/qwen2_schema.hpp"
 #include "brahma/tensor_registry.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
