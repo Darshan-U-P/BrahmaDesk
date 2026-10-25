@@ -47,7 +47,6 @@ export default function InstallerWizard() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [runtimeInstallAttempted, setRuntimeInstallAttempted] = useState(false);
   const [step, setStep] = useState<"scan" | "select" | "download" | "configure" | "complete">("scan");
 
   const refresh = useCallback(async () => {
