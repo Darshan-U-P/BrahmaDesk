@@ -19,7 +19,8 @@ void rope_f32(
     std::size_t sequence_length,
     std::size_t head_dim,
     std::size_t position_offset = 0,
-    float theta = 10000.0f,\n    RopeLayout layout = RopeLayout::Interleaved);
+    float theta = 10000.0f,
+    RopeLayout layout = RopeLayout::Interleaved);
 
 // Single-sequence causal multi-head attention.
 // q/k/v and output use flattened [sequence, heads, head_dim] layout.
