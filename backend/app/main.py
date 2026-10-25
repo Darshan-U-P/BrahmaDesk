@@ -207,7 +207,9 @@ LLAMA_BASE_URL = os.getenv(
 
 def _default_llama_server_exe() -> str:
     """Prefer an explicit or packaged runtime; retain a local dev fallback."""
-    configured = os.getenv("LLAMA_SERVER_EXE") or os.getenv("BRAHMA_PACKAGED_LLAMA_SERVER_EXE")
+    # A packaged build must always prefer its bundled runtime over stale
+    # developer-machine environment variables or paths saved in older installs.
+    configured = os.getenv("BRAHMA_PACKAGED_LLAMA_SERVER_EXE") or os.getenv("LLAMA_SERVER_EXE")
     if configured:
         return configured
     return "D:/all project/llama-b11552-bin-win-cuda-12.4-x64/llama-server.exe"
