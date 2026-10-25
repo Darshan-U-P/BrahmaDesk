@@ -1,4 +1,5 @@
 #include "brahma/qwen2_runtime.hpp"
+#include "brahma/qwen2_tokenizer.hpp"
 #include "brahma/quantization.hpp"
 #include "brahma/tensor_ops.hpp"
 #include <algorithm>
@@ -99,12 +100,13 @@ struct Qwen2Runtime::Impl {
     std::filesystem::path path;
     TensorRegistry registry;
     Qwen2ModelConfig cfg;
+    Qwen2Tokenizer tokenizer;
     std::unordered_map<std::string, std::vector<float>> weights;
     std::vector<std::vector<float>> key_cache;
     std::vector<std::vector<float>> value_cache;
 
     explicit Impl(const std::filesystem::path& p)
-        : path(p), registry(GgufReader::inspect(p), p), cfg(validate_qwen2_schema(registry.model())) {
+        : path(p), registry(GgufReader::inspect(p), p), cfg(validate_qwen2_schema(registry.model())), tokenizer(registry.model()) {
         if (cfg.hidden_size > std::numeric_limits<std::size_t>::max() ||
             cfg.feed_forward_size > std::numeric_limits<std::size_t>::max() ||
             cfg.vocabulary_size > std::numeric_limits<std::size_t>::max() ||
@@ -237,6 +239,23 @@ std::uint32_t Qwen2Runtime::greedy_next_token(std::span<const std::uint32_t> tok
     const auto it = std::max_element(values.begin(), values.end());
     if (it == values.end()) throw std::runtime_error("Model returned empty logits");
     return static_cast<std::uint32_t>(std::distance(values.begin(), it));
+}
+
+std::string Qwen2Runtime::generate(const std::string& prompt, std::size_t max_new_tokens) {
+    if (max_new_tokens == 0) return {};
+    const std::string formatted =
+        "<|im_start|>system\\nYou are a helpful assistant.<|im_end|>\\n"
+        "<|im_start|>user\\n" + prompt + "<|im_end|>\\n<|im_start|>assistant\\n";
+    auto ids = impl_->tokenizer.encode(formatted);
+    std::vector<std::uint32_t> generated;
+    generated.reserve(max_new_tokens);
+    for (std::size_t i = 0; i < max_new_tokens; ++i) {
+        const auto next = greedy_next_token(ids);
+        if (impl_->tokenizer.has_eos_token() && next == impl_->tokenizer.eos_token_id()) break;
+        ids.push_back(next);
+        generated.push_back(next);
+    }
+    return impl_->tokenizer.decode(generated, true);
 }
 
 } // namespace brahma
