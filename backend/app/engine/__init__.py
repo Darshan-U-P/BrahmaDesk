@@ -14,6 +14,7 @@ from .contracts import (
 )
 from .supervisor import EngineSupervisor
 from .llama_cpp_backend import LlamaCppServerBackend
+from .brahma_native_backend import BrahmaNativeBackend
 
 __all__ = [
     "EngineError",
@@ -28,4 +29,5 @@ __all__ = [
     "ResourcePlan",
     "EngineSupervisor",
     "LlamaCppServerBackend",
+    "BrahmaNativeBackend",
 ]
