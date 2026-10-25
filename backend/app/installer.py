@@ -472,10 +472,34 @@ async def scan_local_models() -> dict[str, Any]:
     discovered = []
     rejected = []
     candidates: dict[str, Path] = {}
-    # Search managed model storage recursively, and include the exact GGUF path
-    # passed to a currently running llama-server. Do not scan entire drives.
-    for path in MODEL_DIR.rglob("*.gguf"):
-        candidates[str(path.resolve()).casefold()] = path
+    # Scan the managed model folder plus common user model locations. Never
+    # recursively scan whole drives; skip inaccessible paths and duplicate roots.
+    roots = [
+        MODEL_DIR,
+        Path.home() / "Models",
+        Path.home() / "models",
+        Path.home() / "Downloads",
+        Path.home() / "Documents" / "Models",
+        Path(os.getenv("USERPROFILE", str(Path.home()))) / "models",
+        Path(os.getenv("USERPROFILE", str(Path.home()))) / "Downloads",
+    ]
+    seen_roots: set[str] = set()
+    for root in roots:
+        try:
+            key = str(root.resolve()).casefold()
+            if key in seen_roots or not root.is_dir():
+                continue
+            seen_roots.add(key)
+            # Bound search depth to prevent expensive scans of unrelated folders.
+            for path in root.glob("*.gguf"):
+                candidates[str(path.resolve()).casefold()] = path
+            if root != MODEL_DIR:
+                for child in root.iterdir():
+                    if child.is_dir() and not child.is_symlink():
+                        for path in child.glob("*.gguf"):
+                            candidates[str(path.resolve()).casefold()] = path
+        except OSError:
+            continue
     for path in _running_llama_model_paths():
         candidates[str(path.resolve()).casefold()] = path
     for path in candidates.values():
