@@ -94,6 +94,35 @@ int main(){
   rejected=false;
   try{(void)brahma::dequantize_q4_k(q4_payload,255);}catch(const std::exception&){rejected=true;}
   req(rejected,"Q4_K invalid element count rejection");
+  // Q6_K deterministic block test against a separately written scalar oracle.
+  std::array<std::uint8_t,210> q6{};
+  for(std::size_t i=0;i<128;++i) q6[i]=static_cast<std::uint8_t>((i*37u+11u)&0xffu);
+  for(std::size_t i=128;i<192;++i) q6[i]=static_cast<std::uint8_t>((i*19u+5u)&0xffu);
+  for(std::size_t i=0;i<16;++i) q6[192+i]=static_cast<std::uint8_t>(static_cast<std::int8_t>(int(i)-8));
+  q6[208]=0x00; q6[209]=0x3c; // fp16 d = 1
+  std::array<float,256> q6_decoded{};
+  brahma::dequantize_q6_k_block(q6,q6_decoded);
+  std::array<float,256> q6_oracle{};
+  for(std::size_t half=0;half<2;++half) for(std::size_t l=0;l<32;++l) {
+    const auto qlo0=q6[half*64+l], qlo1=q6[half*64+l+32], hi=q6[128+half*32+l];
+    const int vals[4]={
+      int((qlo0&0x0f)|((hi&0x03)<<4))-32,
+      int((qlo1&0x0f)|(((hi>>2)&0x03)<<4))-32,
+      int((qlo0>>4)|(((hi>>4)&0x03)<<4))-32,
+      int((qlo1>>4)|((hi>>6)<<4))-32
+    };
+    const auto group=l/16, base=half*8;
+    const std::size_t indices[4]={half*128+l,half*128+l+32,half*128+l+64,half*128+l+96};
+    const std::size_t si[4]={base+group,base+group+2,base+group+4,base+group+6};
+    for(int j=0;j<4;++j) q6_oracle[indices[j]]=float(static_cast<std::int8_t>(q6[192+si[j]]))*float(vals[j]);
+  }
+  for(std::size_t i=0;i<256;++i) req(q6_decoded[i]==q6_oracle[i],"Q6_K scalar oracle");
+  const std::vector<std::uint8_t> q6_payload(q6.begin(),q6.end());
+  const auto q6_vector=brahma::dequantize_q6_k(q6_payload,256);
+  req(q6_vector.size()==256&&q6_vector.front()==q6_decoded.front()&&q6_vector.back()==q6_decoded.back(),"Q6_K tensor dequantization");
+  rejected=false;
+  try{(void)brahma::dequantize_q6_k(q6_payload,255);}catch(const std::exception&){rejected=true;}
+  req(rejected,"Q6_K invalid element count rejection");
   std::filesystem::remove(p);std::cout<<"GGUF reader and tensor validator tests passed\n";return 0;
  }catch(const std::exception& e){std::filesystem::remove(p);std::cerr<<e.what()<<"\n";return 1;}
 }
