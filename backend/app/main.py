@@ -1105,10 +1105,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         generation_complete = False
 
         try:
-            if ENGINE_V1_ENABLED:
-                if engine_v1_supervisor is None or GenerationRequest is None:
-                    yield f"data: {json.dumps({'error': 'Engine v1 is enabled but not ready'})}\n\n"
-                    return
+            if ENGINE_V1_ENABLED and engine_v1_supervisor is not None and GenerationRequest is not None:
                 # Map the legacy unlimited sentinel to a safe bounded cap for Engine v1.
                 engine_max_tokens = max(1, min(1024, LLAMA_CONTEXT_SIZE - 256)) if request.max_tokens == -1 else request.max_tokens
                 messages = payload["messages"]
