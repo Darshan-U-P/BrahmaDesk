@@ -546,6 +546,16 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   try {
     if (!isDev) {
+      // The setup choice must run before the backend opens the existing database.
+      // This is the first-run UX for MSI installs; it is intentionally separate
+      // from the MSI's native wizard.
+      const continueStartup = await chooseInstallationMode();
+      if (!continueStartup) {
+        quitting = true;
+        app.quit();
+        return;
+      }
+
       startPackagedBackend();
       await waitForBackend();
     }
