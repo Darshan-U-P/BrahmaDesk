@@ -5,6 +5,7 @@
 #include "brahma/tensor_validator.hpp"
 
 #include <cstdint>
+#include <chrono>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
@@ -19,6 +20,7 @@ void print_usage() {
         << "  brahma-engine <model.gguf> --list-tensors\n"
         << "  brahma-engine <model.gguf> --validate-qwen2\n"
         << "  brahma-engine <model.gguf> --generate \"prompt\" [max-new-tokens]\n"
+        << "  brahma-engine <model.gguf> --tokenize \"text\"\n"
         << "Native Qwen2 CPU inference supports F32, F16, Q4_K and Q6_K tensors.\n";
 }
 
@@ -43,8 +45,8 @@ void print_tensor_list(const brahma::TensorRegistry& registry) {
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 5) { print_usage(); return 2; }
     const std::string mode = argc >= 3 ? argv[2] : "";
-    if (mode == "--generate") {
-        if (argc != 4 && argc != 5) { print_usage(); return 2; }
+    if (mode == "--generate" || mode == "--tokenize") {
+        if ((mode == "--generate" && argc != 4 && argc != 5) || (mode == "--tokenize" && argc != 4)) { print_usage(); return 2; }
     } else if ((argc != 2 && argc != 3) ||
                (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2")) {
         print_usage(); return 2;
@@ -54,14 +56,26 @@ int main(int argc, char** argv) {
         auto model = brahma::GgufReader::inspect(argv[1]);
         brahma::TensorRegistry registry(std::move(model), argv[1]);
 
+        if (mode == "--tokenize") {
+            brahma::Qwen2Runtime runtime(argv[1]);
+            const auto ids = runtime.tokenize(argv[3]);
+            std::cout << "Tokenizer IDs (" << ids.size() << " tokens):";
+            for (const auto id : ids) std::cout << ' ' << id;
+            std::cout << "\nBackend: " << brahma::Qwen2Runtime::parallel_backend() << "\n";
+            return 0;
+        }
         if (mode == "--generate") {
             const auto parsed = argc == 5 ? std::stoull(argv[4]) : 32ULL;
             if (parsed > 4096) throw std::runtime_error("max-new-tokens must not exceed 4096");
+            const auto load_start = std::chrono::steady_clock::now();
             brahma::Qwen2Runtime runtime(argv[1]);
+            const double load_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - load_start).count();
             const auto text = runtime.generate(argv[3], static_cast<std::size_t>(parsed));
             std::cout << text << "\n";
             const auto& stats = runtime.last_generation_stats();
-            std::cerr << "Performance stats (model construction excluded):\n"
+            std::cerr << "Performance stats:\n"
+                      << "Model construction: " << load_seconds << " s (includes GGUF inspection; weights are loaded lazily)\n"
+                      << "Parallel backend: " << brahma::Qwen2Runtime::parallel_backend() << "\n"
                       << "Prompt tokens: " << stats.prompt_tokens << "\n"
                       << "Generated tokens: " << stats.generated_tokens << "\n"
                       << "Prompt prefill: " << stats.prefill_seconds << " s";
@@ -69,7 +83,11 @@ int main(int argc, char** argv) {
                 std::cerr << " (" << static_cast<double>(stats.prompt_tokens) / stats.prefill_seconds
                           << " prompt tokens/s)";
             std::cerr << "\n"
-                      << "Decode loop: " << stats.decode_seconds << " s";
+                      << "Decode loop: " << stats.decode_seconds << " s\n"
+                      << "Operator totals across prefill + decode (overlap-free CPU wall time):\n"
+                      << "  Projections: " << stats.projection_seconds << " s\n"
+                      << "  RMSNorm: " << stats.normalization_seconds << " s\n"
+                      << "  Attention core: " << stats.attention_seconds << " s";
             if (stats.generated_tokens > 0 && stats.decode_seconds > 0.0)
                 std::cerr << " (" << static_cast<double>(stats.generated_tokens) / stats.decode_seconds
                           << " generated tokens/s)";
