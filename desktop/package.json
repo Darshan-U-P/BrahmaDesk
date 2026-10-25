@@ -1,101 +1,101 @@
 {
-    "name":  "brahma-desk",
-    "version":  "0.3.1",
-    "private":  true,
-    "type":  "module",
-    "main":  "electron/main.cjs",
-    "scripts":  {
-                    "dev":  "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 \u0026\u0026 electron .\"",
-                    "build":  "tsc -b \u0026\u0026 vite build",
-                    "preview":  "vite preview --host 127.0.0.1",
-                    "stage:runtime":  "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-llama-runtime.ps1",
-                    "build:backend":  "powershell -NoProfile -ExecutionPolicy Bypass -File ../backend/build_backend.ps1",
-                    "dist:win":  "npm run build \u0026\u0026 npm run stage:runtime \u0026\u0026 npm run build:backend \u0026\u0026 electron-builder --win nsis",
-                    "dist:dir":  "npm run build \u0026\u0026 electron-builder --dir"
-                },
-    "dependencies":  {
-                         "electron-updater":  "^6.3.9",
-                         "lucide-react":  "^0.468.0",
-                         "react":  "^18.3.1",
-                         "react-dom":  "^18.3.1"
-                     },
-    "devDependencies":  {
-                            "@resvg/resvg-js":  "^2.6.2",
-                            "@types/react":  "^18.3.12",
-                            "@types/react-dom":  "^18.3.1",
-                            "@vitejs/plugin-react":  "^4.3.4",
-                            "concurrently":  "^9.1.0",
-                            "electron":  "^33.2.1",
-                            "electron-builder":  "^25.1.8",
-                            "playwright":  "^1.64.1",
-                            "png-to-ico":  "^3.0.2",
-                            "pngjs":  "^7.0.0",
-                            "typescript":  "~5.7.2",
-                            "vite":  "^6.0.5",
-                            "wait-on":  "^8.0.1"
-                        },
-    "description":  "Local-first AI workspace for Windows",
-    "author":  "Brahma Desk",
-    "build":  {
-                  "appId":  "com.brahmadesk.app",
-                  "productName":  "Brahma Desk",
-                  "asar":  true,
-                  "directories":  {
-                                      "output":  "release",
-                                      "buildResources":  "build"
-                                  },
-                  "files":  [
-                                "dist/**/*",
-                                "electron/**/*",
-                                "package.json"
-                            ],
-                  "extraResources":  [
-                                         {
-                                             "from":  "../backend/dist/brahma-backend.exe",
-                                             "to":  "backend/brahma-backend.exe"
-                                         },
-                                         {
-                                             "from":  "build/llama-runtime",
-                                             "to":  "llama-runtime"
-                                         }
-                                     ],
-                  "win":  {
-                              "target":  [
-                                             {
-                                                 "target":  "nsis",
-                                                 "arch":  [
-                                                              "x64"
-                                                          ]
-                                             }
-                                         ],
-                              "artifactName":  "BrahmaDesk-Setup-${version}.${ext}",
-                              "icon":  "build/icon.ico"
-                          },
-                  "msi":  {
-                              "oneClick":  false,
-                              "perMachine":  false,
-                              "upgradeCode":  "{C7F62B3A-5E1D-4D27-9F13-7E0A4B2C9D61}",
-                              "createDesktopShortcut":  true,
-                              "createStartMenuShortcut":  true,
-                              "shortcutName":  "Brahma Desk",
-                              "runAfterFinish":  true
-                          },
-                  "publish":  [
-                                  {
-                                      "provider":  "github",
-                                      "owner":  "Darshan-U-P",
-                                      "repo":  "BrahmaDesk",
-                                      "releaseType":  "release"
-                                  }
-                              ],
-                  "nsis":  {
-                               "oneClick":  false,
-                               "perMachine":  false,
-                               "allowToChangeInstallationDirectory":  true,
-                               "createDesktopShortcut":  true,
-                               "createStartMenuShortcut":  true,
-                               "shortcutName":  "Brahma Desk",
-                               "runAfterFinish":  true
-                           }
-              }
+  "name": "brahma-desk",
+  "version": "0.3.2",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/stage-llama-runtime.ps1",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ../backend/build_backend.ps1",
+    "dist:win": "npm run build && npm run stage:runtime && npm run build:backend && electron-builder --win nsis",
+    "dist:dir": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "playwright": "^1.64.1",
+    "png-to-ico": "^3.0.2",
+    "pngjs": "^7.0.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.5",
+    "wait-on": "^8.0.1"
+  },
+  "description": "Local-first AI workspace for Windows",
+  "author": "Brahma Desk",
+  "build": {
+    "appId": "com.brahmadesk.app",
+    "productName": "Brahma Desk",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/brahma-backend.exe",
+        "to": "backend/brahma-backend.exe"
+      },
+      {
+        "from": "build/llama-runtime",
+        "to": "llama-runtime"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "BrahmaDesk-Setup-${version}.${ext}",
+      "icon": "build/icon.ico"
+    },
+    "msi": {
+      "oneClick": false,
+      "perMachine": false,
+      "upgradeCode": "{C7F62B3A-5E1D-4D27-9F13-7E0A4B2C9D61}",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Brahma Desk",
+      "runAfterFinish": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Darshan-U-P",
+        "repo": "BrahmaDesk",
+        "releaseType": "release"
+      }
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Brahma Desk",
+      "runAfterFinish": true
+    }
+  }
 }
