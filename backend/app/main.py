@@ -582,8 +582,8 @@ def _engine_v1_mode() -> str:
 
 
 async def start_engine_v1() -> None:
-    """Start Engine v1's owned llama.cpp runtime using the selected local model."""
-    global engine_v1_supervisor
+    """Start the owned standard llama.cpp runtime using the selected local model."""
+    global engine_v1_supervisor, LLAMA_BASE_URL
     if EngineSupervisor is None or LlamaCppServerBackend is None or EngineSettings is None:
         raise RuntimeError("Engine v1 modules are unavailable in this installation")
     try:
@@ -618,7 +618,6 @@ async def start_engine_v1() -> None:
     health = await supervisor.health()
     endpoint = health.diagnostics.get("base_url")
     if endpoint:
-        global LLAMA_BASE_URL
         LLAMA_BASE_URL = str(endpoint)
     print("[Brahma Desk] llama.cpp server is ready (owned standard runtime).", flush=True)
 
