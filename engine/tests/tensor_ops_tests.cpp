@@ -39,6 +39,17 @@ int main() {
         catch (const std::invalid_argument&) { rejected = true; }
         req(rejected, "RMSNorm invalid epsilon rejection");
 
+        // SwiGLU: SiLU(gate) multiplied elementwise by the up projection.
+        const std::array<float, 3> gate{-1.0f, 0.0f, 1.0f};
+        const std::array<float, 3> up{2.0f, 3.0f, 4.0f};
+        std::array<float, 3> gated{};
+        brahma::swiglu_f32(gate, up, gated);
+        req(near(gated[0], (-1.0f / (1.0f + std::exp(1.0f))) * 2.0f),
+            "SwiGLU negative gate");
+        req(near(gated[1], 0.0f), "SwiGLU zero gate");
+        req(near(gated[2], (1.0f / (1.0f + std::exp(-1.0f))) * 4.0f),
+            "SwiGLU positive gate");
+
         // RoPE: position zero is identity; position one rotates [1,0] by one radian.
         std::array<float, 4> rope_values{1, 0, 1, 0};
         brahma::rope_f32(rope_values, 2, 2);
