@@ -56,6 +56,47 @@ std::vector<float> decode_tensor(const LoadedTensor& tensor) {
             }
             return out;
         }
+        case 2: case 3: case 6: case 7: case 8: {
+            const auto type = tensor.info.ggml_type;
+            const std::size_t block_bytes = type == 2 ? 18 : type == 3 ? 20 :
+                type == 6 ? 22 : type == 7 ? 24 : 34;
+            const std::size_t values_per_block = 32;
+            if (n % values_per_block || tensor.payload.size() != (n / values_per_block) * block_bytes)
+                throw std::runtime_error("Invalid quantized block payload: " + tensor.info.name);
+            std::vector<float> out(n);
+            for (std::size_t b = 0; b < n / values_per_block; ++b) {
+                const auto* p = tensor.payload.data() + b * block_bytes;
+                const float d = fp16_to_float(std::uint16_t(p[0]) | (std::uint16_t(p[1]) << 8));
+                if (type == 2) {
+                    for (std::size_t j = 0; j < 16; ++j) {
+                        out[b*32+j] = (float(int(p[2+j] & 0x0f)-8))*d;
+                        out[b*32+j+16] = (float(int(p[2+j] >> 4)-8))*d;
+                    }
+                } else if (type == 3) {
+                    const float m = fp16_to_float(std::uint16_t(p[2]) | (std::uint16_t(p[3]) << 8));
+                    for (std::size_t j = 0; j < 16; ++j) {
+                        out[b*32+j] = float(p[4+j] & 0x0f)*d+m;
+                        out[b*32+j+16] = float(p[4+j] >> 4)*d+m;
+                    }
+                } else if (type == 6 || type == 7) {
+                    const std::size_t qh_off = type == 6 ? 2 : 4;
+                    const std::size_t qs_off = type == 6 ? 6 : 8;
+                    const float m = type == 7 ? fp16_to_float(std::uint16_t(p[2]) | (std::uint16_t(p[3]) << 8)) : 0.0f;
+                    std::uint32_t qh = std::uint32_t(p[qh_off]) | (std::uint32_t(p[qh_off+1]) << 8) |
+                        (std::uint32_t(p[qh_off+2]) << 16) | (std::uint32_t(p[qh_off+3]) << 24);
+                    for (std::size_t j = 0; j < 16; ++j) {
+                        const int q0 = int(p[qs_off+j] & 0x0f) | (int((qh >> j) & 1u) << 4);
+                        const int q1 = int(p[qs_off+j] >> 4) | (int((qh >> (j+16)) & 1u) << 4);
+                        out[b*32+j] = (type == 6 ? float(q0-16)*d : float(q0)*d+m);
+                        out[b*32+j+16] = (type == 6 ? float(q1-16)*d : float(q1)*d+m);
+                    }
+                } else {
+                    for (std::size_t j = 0; j < 32; ++j)
+                        out[b*32+j] = d * float(static_cast<std::int8_t>(p[2+j]));
+                }
+            }
+            return out;
+        }
         case 12: return dequantize_q4_k(tensor.payload, n);
         case 14: return dequantize_q6_k(tensor.payload, n);
         default:
