@@ -1670,11 +1670,15 @@ async def get_installer_runtime() -> dict[str, Any]:
                 LLAMA_SERVER_EXE = str(Path(saved_path).resolve())
     except (sqlite3.Error, ValueError, TypeError):
         pass
+    executable = Path(LLAMA_SERVER_EXE).expanduser()
     return {
-        "executable_path": LLAMA_SERVER_EXE,
-        "exists": Path(LLAMA_SERVER_EXE).is_file(),
+        "executable_path": str(executable),
+        "exists": executable.is_file(),
         "runtime": "llama.cpp",
-        "note": "If no runtime is found, Brahma Desk installs the official Windows x64 CPU build automatically, or you can select an existing compatible llama-server.exe.",
+        "note": (
+            "Using the configured llama.cpp server runtime. Choose an existing llama-server.exe "
+            "to preserve CUDA support; the CPU runtime installer is optional."
+        ),
     }
 
 @app.post("/api/installer/runtime/install")
