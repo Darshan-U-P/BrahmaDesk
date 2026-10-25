@@ -1070,7 +1070,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         try:
             if ENGINE_V1_ENABLED:
                 if engine_v1_supervisor is None or GenerationRequest is None:
-                    yield f"data: {json.dumps({'error': 'Engine v1 is enabled but not ready'})}\\n\\n"
+                    yield f"data: {json.dumps({'error': 'Engine v1 is enabled but not ready'})}\n\n"
                     return
                 # Map the legacy unlimited sentinel to a safe bounded cap for Engine v1.
                 engine_max_tokens = max(1, min(1024, LLAMA_CONTEXT_SIZE - 256)) if request.max_tokens == -1 else request.max_tokens
@@ -1088,7 +1088,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 async for chunk in engine_v1_supervisor.generate(engine_request):
                     if chunk.text:
                         answer += chunk.text
-                        yield f"data: {json.dumps({'delta': chunk.text})}\\n\\n"
+                        yield f"data: {json.dumps({'delta': chunk.text})}\n\n"
                     if chunk.finished:
                         generation_complete = True
             else:
@@ -1099,8 +1099,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     ) as upstream:
                         if upstream.status_code >= 400:
                             body = await upstream.aread()
-                            yield f"data: {json.dumps({'error': body.decode('utf-8', errors='replace')})}\\n\\n"
-                            yield "data: [DONE]\\n\\n"
+                            yield f"data: {json.dumps({'error': body.decode('utf-8', errors='replace')})}\n\n"
+                            yield "data: [DONE]\n\n"
                             return
                         async for line in upstream.aiter_lines():
                             if not line.startswith("data:"):
@@ -1119,17 +1119,17 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                             delta = (choices[0].get("delta") or {}).get("content")
                             if delta:
                                 answer += delta
-                                yield f"data: {json.dumps({'delta': delta})}\\n\\n"
+                                yield f"data: {json.dumps({'delta': delta})}\n\n"
 
             if not generation_complete:
-                yield f"data: {json.dumps({'error': 'Model response stream ended unexpectedly'})}\\n\\n"
+                yield f"data: {json.dumps({'error': 'Model response stream ended unexpectedly'})}\n\n"
                 return
 
             # Persist the completed exchange only after the backend indicates success.
             if not conversation_id:
                 conversation_id = str(uuid.uuid4())
                 first_user = next((m.content for m in request.messages if m.role == "user"), "New chat")
-                title = first_user.strip().replace("\\n", " ")[:60] or "New chat"
+                title = first_user.strip().replace("\n", " ")[:60] or "New chat"
                 with db_connect() as db:
                     db.execute(
                         "INSERT INTO conversations(id,title,created_at,updated_at,profile_id) VALUES(?,?,?,?,?)",
@@ -1149,19 +1149,19 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                     existing_title = db.execute("SELECT title FROM conversations WHERE id=?", (conversation_id,)).fetchone()
                     if existing_title and existing_title["title"] == "New chat":
                         first_user = next((m.content for m in request.messages if m.role == "user"), "New chat")
-                        suggested_title = first_user.strip().replace("\\n", " ")[:60] or "New chat"
+                        suggested_title = first_user.strip().replace("\n", " ")[:60] or "New chat"
                         db.execute("UPDATE conversations SET title=?, updated_at=? WHERE id=?", (suggested_title, time.time(), conversation_id))
                     else:
                         db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (time.time(), conversation_id))
-            yield f"data: {json.dumps({'done': True, 'request_id': request_id, 'conversation_id': conversation_id})}\\n\\n"
+            yield f"data: {json.dumps({'done': True, 'request_id': request_id, 'conversation_id': conversation_id})}\n\n"
 
         except httpx.HTTPError as exc:
-            yield f"data: {json.dumps({'error': f'Cannot reach llama.cpp server: {exc}'})}\\n\\n"
+            yield f"data: {json.dumps({'error': f'Cannot reach llama.cpp server: {exc}'})}\n\n"
         except Exception as exc:
             error_message = str(exc) if ENGINE_V1_ENABLED else "Generation failed"
-            yield f"data: {json.dumps({'error': error_message})}\\n\\n"
+            yield f"data: {json.dumps({'error': error_message})}\n\n"
         finally:
-            yield "data: [DONE]\\n\\n"
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         generate(),
