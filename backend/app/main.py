@@ -1346,7 +1346,8 @@ async def edit_message(conversation_id: str, message_id: str, request: MessageEd
         if row is None:
             raise HTTPException(status_code=404, detail="Message not found")
         if row["role"] != "user":
-            raise HTTPException(status_code=400, detail="Only user messages can be edited")        db.execute("UPDATE messages SET content=? WHERE id=?", (content, message_id))
+            raise HTTPException(status_code=400, detail="Only user messages can be edited")
+        db.execute("UPDATE messages SET content=? WHERE id=?", (content, message_id))
         db.execute("DELETE FROM messages WHERE conversation_id=? AND rowid>?", (conversation_id, row["rowid"]))
         db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (time.time(), conversation_id))
     return {"status": "updated", "conversation_id": conversation_id, "message_id": message_id}
