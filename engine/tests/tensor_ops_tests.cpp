@@ -39,6 +39,13 @@ int main() {
         catch (const std::invalid_argument&) { rejected = true; }
         req(rejected, "RMSNorm invalid epsilon rejection");
 
+        const std::array<float, 3> add_a{1.0f, -2.0f, 3.5f};
+        const std::array<float, 3> add_b{4.0f, 2.0f, -0.5f};
+        std::array<float, 3> add_out{};
+        brahma::add_f32(add_a, add_b, add_out);
+        req(near(add_out[0], 5.0f) && near(add_out[1], 0.0f) &&
+            near(add_out[2], 3.0f), "elementwise addition");
+
         // SwiGLU: SiLU(gate) multiplied elementwise by the up projection.
         const std::array<float, 3> gate{-1.0f, 0.0f, 1.0f};
         const std::array<float, 3> up{2.0f, 3.0f, 4.0f};
