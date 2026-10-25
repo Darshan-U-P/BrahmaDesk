@@ -18,7 +18,7 @@ ctest --test-dir engine/build -C Release --output-on-failure
 - [x] Tensor payload bounds, alignment, and overlap validation.
 - [x] Synthetic tests for Q4_K block sizing, truncated payload rejection and unknown-type rejection.
 - [x] Initial Q4_K block/tensor dequantization implementation with deterministic known-value tests (needs Windows CI and real-model numerical validation).\n- [ ] Q6_K/Q5_K dequantization and broader quantization coverage.
-- [x] Initial CPU float32 matrix multiplication, RMSNorm, and SwiGLU activation with unit tests.
+- [x] Initial CPU float32 matrix multiplication, RMSNorm, SwiGLU activation, and elementwise addition with unit tests.
 - [x] Initial RoPE (interleaved and NeoX layouts) and single-sequence causal attention primitives with unit tests.
 - [ ] Qwen2 feed-forward and complete transformer forward pass.
 - [ ] Tokenizer and autoregressive generation.
