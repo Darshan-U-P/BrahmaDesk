@@ -1603,7 +1603,7 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
     occupied by one, move Brahma Desk's managed server to an available loopback
     port and persist that endpoint for subsequent launches.
     """
-    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, MODEL_ID
+    global LLAMA_MODEL_PATH, LLAMA_CONTEXT_SIZE, LLAMA_THREADS, LLAMA_GPU_LAYERS, LLAMA_LOAD_MODE, MODEL_ID
     global llama_process, llama_process_owned, llama_start_error, engine_v1_supervisor
 
     if __package__:
@@ -1636,6 +1636,8 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
         LLAMA_CONTEXT_SIZE = int(config["context_size"])
         LLAMA_THREADS = int(config["threads"])
         LLAMA_GPU_LAYERS = str(config["gpu_layers"])
+        configured_mode = str(config.get("mode", "auto")).strip().lower()
+        LLAMA_LOAD_MODE = configured_mode if configured_mode in {"auto", "cpu", "hybrid", "gpu"} else "auto"
         MODEL_ID = model_id
         try:
             await start_engine_v1(force_owned=True)
