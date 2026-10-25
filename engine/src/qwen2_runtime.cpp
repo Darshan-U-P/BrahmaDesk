@@ -9,6 +9,9 @@
 #include <limits>
 #include <stdexcept>
 #include <utility>
+#ifdef BRAHMA_ENGINE_USE_OPENMP
+#include <omp.h>
+#endif
 
 namespace brahma {
 namespace {
@@ -117,12 +120,18 @@ std::vector<float> linear_vector(std::span<const float> input, std::span<const f
     std::vector<float> output(output_width, 0.0f);
     // GGUF stores the first tensor dimension contiguously. For a [input, output]
     // GGUF matrix this is output-major, with input_width contiguous per output.
-    for (std::size_t row = 0; row < output_width; ++row) {
+    // Independent output rows can be evaluated in parallel; float accumulation
+    // allows MSVC's optimized Release build to vectorize the inner dot product.
+#ifdef BRAHMA_ENGINE_USE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (std::int64_t row_i = 0; row_i < static_cast<std::int64_t>(output_width); ++row_i) {
+        const auto row = static_cast<std::size_t>(row_i);
         const auto offset = row * input.size();
-        double sum = 0.0;
+        float sum = 0.0f;
         for (std::size_t col = 0; col < input.size(); ++col)
-            sum += static_cast<double>(weight[offset + col]) * input[col];
-        output[row] = static_cast<float>(sum);
+            sum += weight[offset + col] * input[col];
+        output[row] = sum;
     }
     return output;
 }
