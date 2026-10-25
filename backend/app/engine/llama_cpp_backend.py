@@ -236,7 +236,10 @@ class LlamaCppServerBackend:
             diagnostics={
                 "base_url": self._base_url,
                 "pid": self._process.pid if alive and self._process else None,
-            },    async def generate(
+            },
+        )
+
+    async def generate(
         self, request: GenerationRequest
     ) -> AsyncIterator[GenerationChunk]:
         if not await self._endpoint_ready() or not self._base_url or not self._model:
@@ -340,8 +343,6 @@ class LlamaCppServerBackend:
                 "generate",
                 {"reason": str(exc)},
             ) from exc
-
-on="stop")
 
     async def stop(self) -> None:
         process = self._process
