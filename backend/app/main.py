@@ -727,7 +727,23 @@ async def health() -> dict[str, Any]:
             llama_process is not None and llama_process.poll() is None
         ),
         "startup_error": llama_start_error,
+        "engine_backend": "llama.cpp",
     }
+
+    if ENGINE_V1_ENABLED and engine_v1_supervisor is not None:
+        try:
+            engine_health = await engine_v1_supervisor.health()
+            status["engine_backend"] = engine_health.backend
+            status["engine_state"] = engine_health.state.value
+            status["llama_server"] = "ok" if engine_health.generation_ready else "unreachable"
+            status["model"] = engine_health.model_id
+            status["managed_by_backend"] = engine_health.process_owned
+            status["llama_process_running"] = engine_health.process_owned
+            if engine_health.message:
+                status["startup_error"] = engine_health.message
+            return status
+        except Exception as exc:
+            status["startup_error"] = str(exc)
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
