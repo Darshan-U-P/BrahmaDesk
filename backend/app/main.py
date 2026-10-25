@@ -626,7 +626,13 @@ async def start_engine_v1() -> None:
 async def lifespan(_: FastAPI):
     await load_saved_llama_server_path()
     if ENGINE_V1_ENABLED:
-        await start_engine_v1()
+        try:
+            await start_engine_v1()
+        except Exception as exc:
+            # Keep the backend and legacy streaming route available so the UI
+            # can display a usable startup error and allow runtime reconfiguration.
+            print(f"[Brahma Desk] Engine server startup failed: {exc}", flush=True)
+            await start_llama_if_needed()
     else:
         await start_llama_if_needed()
     try:
