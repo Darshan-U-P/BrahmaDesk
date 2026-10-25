@@ -70,12 +70,9 @@ export default function InstallerWizard() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => {
-    if (runtime && !runtime.exists && !runtimeInstallAttempted) {
-      setRuntimeInstallAttempted(true);
-      void installRuntime();
-    }
-  }, [runtime, runtimeInstallAttempted]);
+  // Do not automatically download a CPU-only runtime when a valid local CUDA
+  // build may be installed elsewhere. Show the runtime controls and let the
+  // user explicitly install or select a compatible llama-server.exe.
   useEffect(() => {
     const timer = window.setInterval(() => {
       void api<{ jobs: Job[] }>("/api/installer/downloads").then(result => setJobs(result.jobs)).catch(() => undefined);
@@ -180,7 +177,7 @@ export default function InstallerWizard() {
       <div className="installer-section-heading"><div><span className="installer-kicker">RUNTIME</span><h2>llama.cpp engine</h2></div><span className={"installer-tag " + (runtime?.exists ? "recommended" : "unknown")}>{runtime?.exists ? "Found" : "Needs setup"}</span></div>
       <p className="installer-muted">{runtime?.note || "Checking local runtime…"}</p>
       <div className="installer-runtime-row"><code>{runtime?.executable_path || "Runtime path not available"}</code><button className="installer-primary" onClick={() => void installRuntime()} disabled={busy}><Download size={15}/>{busy ? "Installing runtime…" : "Install / repair runtime"}</button><button className="installer-ghost-button" onClick={() => void chooseRuntime()} disabled={busy}><HardDrive size={15}/> Choose existing runtime</button></div>
-      {!runtime?.exists && <p className="installer-runtime-warning">Brahma Desk will attempt to install the official Windows x64 CPU runtime automatically. You can also select an existing runtime. It will not stop or replace a llama.cpp process it does not own.</p>}
+      {!runtime?.exists && <p className="installer-runtime-warning">No runtime is configured yet. Choose your existing llama-server.exe to retain its CUDA support, or explicitly install the official Windows x64 CPU runtime. Brahma Desk will not stop or replace an external llama.cpp process.</p>}
     </section>
 
     <section className="installer-section">
