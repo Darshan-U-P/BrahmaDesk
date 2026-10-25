@@ -5,6 +5,8 @@
 
 namespace brahma {
 
+enum class RopeLayout { Interleaved, NeoX };
+
 // Row-major dense matrix multiplication: A[M,K] * B[K,N] -> C[M,N].
 [[nodiscard]] std::vector<float> matmul_f32(
     std::span<const float> a, std::size_t m, std::size_t k,
@@ -17,7 +19,7 @@ void rope_f32(
     std::size_t sequence_length,
     std::size_t head_dim,
     std::size_t position_offset = 0,
-    float theta = 10000.0f);
+    float theta = 10000.0f,\n    RopeLayout layout = RopeLayout::Interleaved);
 
 // Single-sequence causal multi-head attention.
 // q/k/v and output use flattened [sequence, heads, head_dim] layout.
