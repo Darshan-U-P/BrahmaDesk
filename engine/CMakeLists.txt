@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(BrahmaEngine VERSION 0.1.0 LANGUAGES CXX)
 option(BRAHMA_ENGINE_BUILD_TESTS "Build Brahma Engine tests" ON)
-add_library(brahma_engine_core src/gguf_reader.cpp)
+add_library(brahma_engine_core src/gguf_reader.cpp src/tensor_validator.cpp)
 target_include_directories(brahma_engine_core PUBLIC include)
 target_compile_features(brahma_engine_core PUBLIC cxx_std_20)
 if(MSVC)
