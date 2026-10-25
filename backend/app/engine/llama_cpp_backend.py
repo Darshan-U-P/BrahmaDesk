@@ -136,6 +136,28 @@ class LlamaCppServerBackend:
             probe.bind((host, 0))
             return int(probe.getsockname()[1])
 
+    def _build_command(self, model: ModelArtifact, settings: EngineSettings) -> list[str]:
+        """Build the standard llama-server command for the selected local model."""
+        port = self._available_port(self._host)
+        if settings.mode == "cpu":
+            gpu_layers = 0
+        elif settings.gpu_layers is not None:
+            gpu_layers = max(0, settings.gpu_layers)
+        elif settings.mode == "hybrid":
+            gpu_layers = 20
+        elif settings.mode == "gpu":
+            gpu_layers = 999
+        else:
+            gpu_layers = 20
+
+        threads = settings.threads or max(1, min((__import__("os").cpu_count() or 4) - 1, 16))
+        return [
+            str(self._executable), "-m", str(model.path),
+            "--alias", model.model_id, "--host", self._host, "--port", str(port),
+            "-t", str(threads), "-c", str(settings.context_size),
+            "-ngl", str(gpu_layers), "--no-webui",
+        ]
+
     async def start(
         self, model: ModelArtifact, settings: EngineSettings
     ) -> EngineHealth:
@@ -151,19 +173,7 @@ class LlamaCppServerBackend:
                 {"executable": str(self._executable)},
             )
 
-        port = self._available_port(self._host)
-        gpu_layers = settings.gpu_layers
-        if gpu_layers is None:
-            # Keep "auto" conservative and predictable; the existing installer
-            # settings can explicitly request more GPU layers after validation.
-            gpu_layers = 0 if settings.mode == "cpu" else (20 if settings.mode == "hybrid" else 20 if settings.mode == "auto" else 999)
-        threads = settings.threads or max(1, min((__import__("os").cpu_count() or 4) - 1, 16))
-        command = [
-            str(self._executable), "-m", str(model.path),
-            "--alias", model.model_id, "--host", self._host, "--port", str(port),
-            "-t", str(threads), "-c", str(settings.context_size),
-            "-ngl", str(gpu_layers), "--no-webui",
-        ]
+        command = self._build_command(model, settings)
         # Run from the binary directory so Windows resolves CUDA/GGML DLLs
         # distributed alongside llama-server.exe.
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
