@@ -598,9 +598,11 @@ async def start_engine_v1() -> None:
     # The Engine v1 adapter starts its own server on an allocated port only
     # when no server is already available at the configured endpoint.
     if await llama_is_ready():
+        # The API endpoint may belong to an unrelated server. Do not attach the
+        # Engine supervisor to an external process or shut it down on app exit.
         print(
-            f"[Brahma Desk] Reusing existing llama.cpp server at {LLAMA_BASE_URL}; "
-            "external process ownership is unchanged.",
+            f"[Brahma Desk] Existing llama.cpp endpoint detected at {LLAMA_BASE_URL}; "
+            "leaving it external and using the standard HTTP streaming path.",
             flush=True,
         )
         return
