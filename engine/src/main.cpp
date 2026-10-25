@@ -1,5 +1,6 @@
 #include "brahma/gguf_reader.hpp"
 #include "brahma/qwen2_schema.hpp"
+#include "brahma/qwen2_runtime.hpp"
 #include "brahma/tensor_registry.hpp"
 #include "brahma/tensor_validator.hpp"
 
@@ -39,13 +40,15 @@ void print_tensor_list(const brahma::TensorRegistry& registry) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2 && argc != 3) {
+    if (argc < 2 || argc > 5) {
         print_usage();
         return 2;
     }
 
-    const std::string mode = argc == 3 ? argv[2] : "";
-    if (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2") {
+    const std::string mode = argc >= 3 ? argv[2] : "";
+    if (mode == "--generate") {
+        if (argc != 4 && argc != 5) { print_usage(); return 2; }
+    } else if ((argc != 2 && argc != 3) || (!mode.empty() && mode != "--list-tensors" && mode != "--validate-qwen2")) {
         print_usage();
         return 2;
     }
@@ -54,6 +57,13 @@ int main(int argc, char** argv) {
         auto model = brahma::GgufReader::inspect(argv[1]);
         brahma::TensorRegistry registry(std::move(model), argv[1]);
 
+        if (mode == "--generate") {
+            const auto max_tokens = argc == 5 ? static_cast<std::size_t>(std::stoull(argv[4])) : 32u;
+            if (max_tokens > 4096) throw std::runtime_error("max-new-tokens must not exceed 4096");
+            brahma::Qwen2Runtime runtime(argv[1]);
+            std::cout << runtime.generate(argv[3], max_tokens) << "\\n";
+            return 0;
+        }
         if (mode == "--list-tensors") {
             print_tensor_list(registry);
             return 0;
