@@ -3,6 +3,7 @@
 #include "brahma/tensor_registry.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <span>
@@ -11,6 +12,13 @@
 #include <vector>
 
 namespace brahma {
+
+struct GenerationStats {
+    std::size_t prompt_tokens{};
+    std::size_t generated_tokens{};
+    double prefill_seconds{};
+    double decode_seconds{};
+};
 
 // Native CPU Qwen2 inference runtime. Weights are decoded from GGUF directly;
 // this class has no llama.cpp/GGML dependency.
@@ -25,6 +33,7 @@ public:
     Qwen2Runtime& operator=(const Qwen2Runtime&) = delete;
 
     [[nodiscard]] const Qwen2ModelConfig& config() const noexcept;
+    [[nodiscard]] const GenerationStats& last_generation_stats() const noexcept;
     // Replays the supplied token IDs from position zero and returns next-token logits.
     [[nodiscard]] std::vector<float> logits(std::span<const std::uint32_t> token_ids);
     [[nodiscard]] std::uint32_t greedy_next_token(std::span<const std::uint32_t> token_ids);
