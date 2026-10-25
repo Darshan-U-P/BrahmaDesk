@@ -110,8 +110,8 @@ bool is_unicode_letter_or_number(std::uint32_t cp) {
     if (cp <= 0xffff) {
         const wchar_t ch = static_cast<wchar_t>(cp);
         WORD type = 0;
-        if (GetStringTypeW(CT_CTYPE1, &ch, 1, &type) != 0 &&
-            (type & (C1_ALPHA | C1_DIGIT)) != 0) return true;
+        if (GetStringTypeW(CT_CTYPE1, &ch, 1, &type) != 0)
+            return (type & (C1_ALPHA | C1_DIGIT)) != 0;
     }
 #endif
     // Portable fallback for common scripts when Windows Unicode classification is unavailable.
