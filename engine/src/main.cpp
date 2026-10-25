@@ -109,13 +109,13 @@ int main(int argc, char** argv) {
             std::cerr << "\n";
             return 0;
         }
+        auto model = brahma::GgufReader::inspect(argv[1]);
+        brahma::TensorRegistry registry(std::move(model), argv[1]);
+
         if (mode == "--list-tensors") {
             print_tensor_list(registry);
             return 0;
         }
-        auto model = brahma::GgufReader::inspect(argv[1]);
-        brahma::TensorRegistry registry(std::move(model), argv[1]);
-
         if (mode == "--validate-qwen2") {
             const auto config = brahma::validate_qwen2_schema(registry.model());
             std::cout << "Qwen2 schema validation: PASS\n"
