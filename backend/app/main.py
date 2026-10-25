@@ -590,16 +590,37 @@ async def start_engine_v1() -> None:
         gpu_layers: int | None = max(0, int(LLAMA_GPU_LAYERS))
     except (TypeError, ValueError):
         gpu_layers = None
+    executable = Path(LLAMA_SERVER_EXE).expanduser()
+    model_path = Path(LLAMA_MODEL_PATH).expanduser()
+
+    # If another compatible llama-server already responds on LLAMA_BASE_URL,
+    # respect that external server and keep it external (never stop it).
+    # The Engine v1 adapter starts its own server on an allocated port only
+    # when no server is already available at the configured endpoint.
+    if await llama_is_ready():
+        print(
+            f"[Brahma Desk] Reusing existing llama.cpp server at {LLAMA_BASE_URL}; "
+            "external process ownership is unchanged.",
+            flush=True,
+        )
+        return
+
     supervisor = EngineSupervisor(
-        LlamaCppServerBackend(Path(LLAMA_SERVER_EXE).expanduser(), startup_timeout=LLAMA_STARTUP_TIMEOUT)
+        LlamaCppServerBackend(executable, startup_timeout=LLAMA_STARTUP_TIMEOUT)
     )
     await supervisor.start(
-        Path(LLAMA_MODEL_PATH).expanduser(),
+        model_path,
         EngineSettings(context_size=LLAMA_CONTEXT_SIZE, mode=_engine_v1_mode(),
                        threads=max(1, LLAMA_THREADS), gpu_layers=gpu_layers),
     )
     engine_v1_supervisor = supervisor
-    print("[Brahma Desk] Engine v1 is ready (owned llama.cpp runtime).", flush=True)
+    # Expose the owned server's randomly assigned port to the existing chat API.
+    health = await supervisor.health()
+    endpoint = health.diagnostics.get("base_url")
+    if endpoint:
+        global LLAMA_BASE_URL
+        LLAMA_BASE_URL = str(endpoint)
+    print("[Brahma Desk] llama.cpp server is ready (owned standard runtime).", flush=True)
 
 
 @asynccontextmanager
