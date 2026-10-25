@@ -1676,24 +1676,37 @@ async def activate_installer_model(model_id: str) -> dict[str, Any]:
             )
 
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(
-                f"{LLAMA_BASE_URL}/v1/chat/completions",
-                json={
-                    "model": MODEL_ID,
-                    "messages": [{"role": "user", "content": "Reply with the word READY."}],
-                    "max_tokens": 12,
-                    "temperature": 0,
-                    "stream": False,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            choices = payload.get("choices") or []
-            answer = choices[0].get("message", {}).get("content", "") if choices else ""
-            if not isinstance(answer, str) or not answer.strip():
-                raise ValueError("The model returned no text")
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        if ENGINE_V1_ENABLED and engine_v1_supervisor is not None and GenerationRequest is not None:
+            chunks = [
+                chunk async for chunk in engine_v1_supervisor.generate(
+                    GenerationRequest(
+                        prompt="Reply with the word READY.",
+                        max_tokens=12,
+                        temperature=0.0,
+                        messages=[{"role": "user", "content": "Reply with the word READY."}],
+                    )
+                )
+            ]
+            answer = "".join(chunk.text for chunk in chunks)
+        else:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                response = await client.post(
+                    f"{LLAMA_BASE_URL}/v1/chat/completions",
+                    json={
+                        "model": MODEL_ID,
+                        "messages": [{"role": "user", "content": "Reply with the word READY."}],
+                        "max_tokens": 12,
+                        "temperature": 0,
+                        "stream": False,
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                choices = payload.get("choices") or []
+                answer = choices[0].get("message", {}).get("content", "") if choices else ""
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("The model returned no text")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, EngineError) as exc:
         raise HTTPException(
             status_code=502,
             detail=f"Model server started but the generation smoke test failed: {exc}",
