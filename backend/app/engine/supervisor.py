@@ -106,10 +106,21 @@ class EngineSupervisor:
                 self._last_error = None
                 return health
             except EngineError:
-                if self._state != EngineState.FAILED:
-                    self._state = EngineState.FAILED
+                # A backend may have spawned its owned process before discovering
+                # that startup did not complete. Always ask it to clean up; adapters
+                # must stop only resources they own. Preserve the original startup
+                # error if cleanup also fails.
+                try:
+                    await self._backend.stop()
+                except Exception:
+                    pass
+                self._state = EngineState.FAILED
                 raise
             except Exception as exc:
+                try:
+                    await self._backend.stop()
+                except Exception:
+                    pass
                 self._state = EngineState.FAILED
                 error = EngineError(
                     EngineErrorCode.RUNTIME_START_FAILED,
