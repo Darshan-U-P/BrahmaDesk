@@ -90,22 +90,20 @@ def create_brahmadesk_memory_tools(
         category = str(arguments.get("category", "general")).strip() or "general"
         if not content or len(content) > 4000 or len(category) > 50:
             raise ToolExecutionError("Memory content or category exceeds allowed bounds.")
+        if context.metadata.get("project_id") is None:
+            return save_global_memory(profile_id, content, category)
+
         with db_connect() as db:
             project_id = project_id_from(context, db)
-            if project_id is None:
-                existing = None
-            else:
-                existing = db.execute(
+            existing = db.execute(
                 """
                 SELECT id FROM memories
                 WHERE profile_id = ? AND project_id = ? AND status = 'active'
                   AND LOWER(TRIM(content)) = LOWER(TRIM(?))
                 LIMIT 1
-                    """,
-                    (profile_id, project_id, content),
-                ).fetchone()
-            if project_id is None:
-                return save_global_memory(profile_id, content, category)
+                """,
+                (profile_id, project_id, content),
+            ).fetchone()
             now = time.time()
             if existing:
                 db.execute(
