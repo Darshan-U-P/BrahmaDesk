@@ -2,4 +2,4 @@ fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 httpx>=0.27,<1
 pydantic>=2.8,<3
-../third_party/ultk
+../third_party/ultk[browser,computer,computer-visual,computer-vision,computer-os,documents,documents-xls,documents-odf,structured-data,databases,media]
