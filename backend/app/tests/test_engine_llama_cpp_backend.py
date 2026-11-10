@@ -152,3 +152,131 @@ def test_generate_uses_full_messages_and_streams_chunks(
     chunks = asyncio.run(collect())
     assert "".join(chunk.text for chunk in chunks) == "Hello world"
     assert any(chunk.finished and chunk.finish_reason == "stop" for chunk in chunks)
+
+
+
+def test_parse_tool_calls_validates_and_normalizes_arguments(tmp_path: Path) -> None:
+    backend = LlamaCppServerBackend(tmp_path / "llama-server.exe")
+
+    calls = backend._parse_tool_calls([
+        {
+            "id": "call-1",
+            "function": {
+                "name": "filesystem.list_files",
+                "arguments": '{"path":"."}',
+            },
+        },
+        {
+            "id": "call-2",
+            "function": {
+                "name": "system.get_platform_info",
+                "arguments": {},
+            },
+        },
+    ])
+
+    assert len(calls) == 2
+    assert calls[0].id == "call-1"
+    assert calls[0].name == "filesystem.list_files"
+    assert calls[0].arguments == {"path": "."}
+    assert calls[1].arguments == {}
+
+
+def test_parse_tool_calls_rejects_malformed_or_non_object_arguments(tmp_path: Path) -> None:
+    backend = LlamaCppServerBackend(tmp_path / "llama-server.exe")
+
+    with pytest.raises(ValueError, match="malformed JSON"):
+        backend._parse_tool_calls([
+            {
+                "id": "call-1",
+                "function": {"name": "test.tool", "arguments": "{bad"},
+            }
+        ])
+
+    with pytest.raises(ValueError, match="JSON object"):
+        backend._parse_tool_calls([
+            {
+                "id": "call-1",
+                "function": {"name": "test.tool", "arguments": '["not", "an", "object"]'},
+            }
+        ])
+
+
+def test_generate_non_streaming_returns_structured_tool_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = LlamaCppServerBackend(tmp_path / "llama-server.exe")
+    backend._base_url = "http://127.0.0.1:12345"
+    backend._model = type("Model", (), {"model_id": "test-model"})()
+
+    async def endpoint_ready() -> bool:
+        return True
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": "call-abc",
+                            "type": "function",
+                            "function": {
+                                "name": "system.get_platform_info",
+                                "arguments": "{}",
+                            },
+                        }],
+                    },
+                }]
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, json):
+            assert url.endswith("/v1/chat/completions")
+            assert json["stream"] is False
+            assert json["tool_choice"] == "auto"
+            assert len(json["tools"]) == 1
+            return FakeResponse()
+
+    monkeypatch.setattr(backend, "_endpoint_ready", endpoint_ready)
+    monkeypatch.setattr("app.engine.llama_cpp_backend.httpx.AsyncClient", FakeClient)
+
+    async def collect():
+        return [
+            chunk async for chunk in backend.generate(
+                GenerationRequest(
+                    prompt="Inspect this machine",
+                    messages=[{"role": "user", "content": "Inspect this machine"}],
+                    stream=False,
+                    tools=[{
+                        "type": "function",
+                        "function": {
+                            "name": "system.get_platform_info",
+                            "description": "Inspect platform",
+                            "parameters": {"type": "object", "properties": {}},
+                        },
+                    }],
+                )
+            )
+        ]
+
+    chunks = asyncio.run(collect())
+    assert len(chunks) == 1
+    assert chunks[0].finished is True
+    assert chunks[0].finish_reason == "tool_calls"
+    assert chunks[0].tool_calls[0].id == "call-abc"
+    assert chunks[0].tool_calls[0].arguments == {}
