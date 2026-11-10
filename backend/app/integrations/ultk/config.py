@@ -7,6 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+SUPPORTED_PACKS = frozenset({
+    "filesystem", "system", "process", "terminal", "computer",
+    "computer_advanced", "computer_os", "computer_visual", "computer_vision",
+    "browser", "browser_comprehensive", "browser_semantic", "development",
+    "development_advanced", "git", "documents", "data", "structured_data",
+    "database", "media", "rest", "email", "scheduler", "plugins", "memory",
+})
+
 
 def _parse_bool(value: str | None, *, default: bool = False) -> bool:
     if value is None:
@@ -37,6 +45,17 @@ def _parse_int(
     return value
 
 
+def _parse_set(env: Mapping[str, str], key: str) -> frozenset[str]:
+    values = frozenset(
+        item.strip()
+        for item in env.get(key, "").split(",")
+        if item.strip()
+    )
+    if any(len(item) > 128 for item in values):
+        raise ValueError(f"{key} entries must be at most 128 characters")
+    return values
+
+
 def _default_data_dir(env: Mapping[str, str]) -> Path:
     override = env.get("BRAHMA_DATA_DIR")
     if override:
@@ -58,7 +77,11 @@ class ULTKSettings:
     audit_path: Path
     approval_ttl_seconds: int
     workspace_root: Path | None
+    enabled_packs: frozenset[str]
     enabled_tools: frozenset[str]
+    granted_capabilities: frozenset[str]
+    approval_capabilities: frozenset[str]
+    trusted_plugins: frozenset[str]
 
     @classmethod
     def from_env(
@@ -80,7 +103,9 @@ class ULTKSettings:
             minimum=1, maximum=86_400,
         )
 
-        default_policy = source.get("BRAHMA_ULTK_DEFAULT_POLICY", "deny").strip().casefold()
+        default_policy = source.get(
+            "BRAHMA_ULTK_DEFAULT_POLICY", "deny"
+        ).strip().casefold()
         if default_policy not in {"deny", "interactive"}:
             raise ValueError("BRAHMA_ULTK_DEFAULT_POLICY must be 'deny' or 'interactive'")
 
@@ -91,13 +116,15 @@ class ULTKSettings:
         ):
             raise ValueError("BRAHMA_ULTK_WORKSPACE_ROOT must point to an existing directory")
 
-        enabled_tools = frozenset(
-            item.strip()
-            for item in source.get("BRAHMA_ULTK_ENABLED_TOOLS", "").split(",")
-            if item.strip()
-        )
-        if any(len(item) > 128 for item in enabled_tools):
-            raise ValueError("Tool identifiers must be at most 128 characters")
+        enabled_packs = _parse_set(source, "BRAHMA_ULTK_ENABLED_PACKS")
+        unknown_packs = sorted(enabled_packs - SUPPORTED_PACKS)
+        if unknown_packs:
+            raise ValueError("Unsupported ULTK pack(s): " + ", ".join(unknown_packs))
+
+        enabled_tools = _parse_set(source, "BRAHMA_ULTK_ENABLED_TOOLS")
+        granted_capabilities = _parse_set(source, "BRAHMA_ULTK_GRANTED_CAPABILITIES")
+        approval_capabilities = _parse_set(source, "BRAHMA_ULTK_APPROVAL_CAPABILITIES")
+        trusted_plugins = _parse_set(source, "BRAHMA_ULTK_TRUSTED_PLUGINS")
 
         root_data_dir = (data_dir or _default_data_dir(source)).expanduser().resolve()
         audit_path = Path(
@@ -115,5 +142,9 @@ class ULTKSettings:
             audit_path=audit_path,
             approval_ttl_seconds=approval_ttl_seconds,
             workspace_root=workspace_root,
+            enabled_packs=enabled_packs,
             enabled_tools=enabled_tools,
+            granted_capabilities=granted_capabilities,
+            approval_capabilities=approval_capabilities,
+            trusted_plugins=trusted_plugins,
         )
