@@ -1408,8 +1408,8 @@ async def run_agent(request: AgentRunRequest) -> StreamingResponse:
                 event = await event_queue.get()
                 if event is None:
                     break
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\\n\\n"
-            yield "data: [DONE]\\n\\n"
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
         finally:
             if not task.done():
                 task.cancel()
