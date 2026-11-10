@@ -17,6 +17,10 @@ def test_ultk_is_disabled_and_deny_by_default(tmp_path: Path) -> None:
     assert settings.audit_path == (tmp_path / "ultk" / "audit.sqlite3").resolve()
     assert settings.workspace_root is None
     assert settings.enabled_tools == frozenset()
+    assert settings.enabled_packs == frozenset()
+    assert settings.granted_capabilities == frozenset()
+    assert settings.approval_capabilities == frozenset()
+    assert settings.trusted_plugins == frozenset()
 
 
 def test_ultk_settings_parse_host_owned_limits(tmp_path: Path) -> None:
@@ -73,3 +77,35 @@ def test_ultk_workspace_root_must_exist_and_be_a_directory(tmp_path: Path) -> No
         data_dir=tmp_path,
     )
     assert settings.workspace_root == workspace.resolve()
+
+
+
+def test_ultk_settings_parse_packs_tools_and_capabilities(tmp_path: Path) -> None:
+    settings = ULTKSettings.from_env(
+        {
+            "BRAHMA_ULTK_ENABLED_PACKS": "filesystem,documents,git",
+            "BRAHMA_ULTK_ENABLED_TOOLS": "filesystem.read_file,documents.extract_text",
+            "BRAHMA_ULTK_GRANTED_CAPABILITIES": "filesystem:read,documents:extract",
+            "BRAHMA_ULTK_APPROVAL_CAPABILITIES": "filesystem:write",
+            "BRAHMA_ULTK_TRUSTED_PLUGINS": "com.example.trusted",
+        },
+        data_dir=tmp_path,
+    )
+
+    assert settings.enabled_packs == frozenset({"filesystem", "documents", "git"})
+    assert settings.enabled_tools == frozenset(
+        {"filesystem.read_file", "documents.extract_text"}
+    )
+    assert settings.granted_capabilities == frozenset(
+        {"filesystem:read", "documents:extract"}
+    )
+    assert settings.approval_capabilities == frozenset({"filesystem:write"})
+    assert settings.trusted_plugins == frozenset({"com.example.trusted"})
+
+
+def test_ultk_settings_reject_unknown_tool_packs(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Unsupported ULTK pack"):
+        ULTKSettings.from_env(
+            {"BRAHMA_ULTK_ENABLED_PACKS": "unrestricted_shell"},
+            data_dir=tmp_path,
+        )
