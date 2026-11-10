@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 SUPPORTED_PACKS = frozenset({
-    "filesystem", "system", "process", "terminal", "computer",
+    "filesystem", "system", "process", "terminal", "computer", "computer_grounding",
     "computer_advanced", "computer_os", "computer_visual", "computer_vision",
-    "browser", "browser_comprehensive", "browser_semantic", "development",
+    "browser", "browser_comprehensive", "browser_semantic", "web", "development",
     "development_advanced", "git", "documents", "data", "structured_data",
     "database", "media", "rest", "email", "scheduler", "plugins", "memory",
 })
@@ -56,6 +57,35 @@ def _parse_set(env: Mapping[str, str], key: str) -> frozenset[str]:
     return values
 
 
+def _parse_json_object(env: Mapping[str, str], key: str) -> dict[str, Any]:
+    raw = env.get(key, "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{key} must contain valid JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must contain a JSON object")
+    return value
+
+
+def _validate_alias_path_map(value: dict[str, Any], key: str) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for alias, path in value.items():
+        if (
+            not isinstance(alias, str)
+            or not alias
+            or len(alias) > 64
+            or not isinstance(path, str)
+            or not path.strip()
+            or len(path) > 1024
+        ):
+            raise ValueError(f"{key} must map bounded string aliases to paths")
+        normalized[alias] = path
+    return normalized
+
+
 def _default_data_dir(env: Mapping[str, str]) -> Path:
     override = env.get("BRAHMA_DATA_DIR")
     if override:
@@ -82,6 +112,13 @@ class ULTKSettings:
     granted_capabilities: frozenset[str]
     approval_capabilities: frozenset[str]
     trusted_plugins: frozenset[str]
+    database_profiles: dict[str, dict[str, Any]]
+    rest_endpoints: dict[str, dict[str, Any]]
+    smtp_config: dict[str, Any]
+    allowed_executables: dict[str, str]
+    allowed_apps: dict[str, str]
+    allow_database_writes: bool
+    allow_rest_writes: bool
 
     @classmethod
     def from_env(
@@ -125,6 +162,43 @@ class ULTKSettings:
         granted_capabilities = _parse_set(source, "BRAHMA_ULTK_GRANTED_CAPABILITIES")
         approval_capabilities = _parse_set(source, "BRAHMA_ULTK_APPROVAL_CAPABILITIES")
         trusted_plugins = _parse_set(source, "BRAHMA_ULTK_TRUSTED_PLUGINS")
+        database_profiles = _parse_json_object(source, "BRAHMA_ULTK_DATABASE_PROFILES_JSON")
+        rest_endpoints = _parse_json_object(source, "BRAHMA_ULTK_REST_ENDPOINTS_JSON")
+        smtp_config = _parse_json_object(source, "BRAHMA_ULTK_SMTP_CONFIG_JSON")
+        allowed_executables = _validate_alias_path_map(
+            _parse_json_object(source, "BRAHMA_ULTK_ALLOWED_EXECUTABLES_JSON"),
+            "BRAHMA_ULTK_ALLOWED_EXECUTABLES_JSON",
+        )
+        allowed_apps = _validate_alias_path_map(
+            _parse_json_object(source, "BRAHMA_ULTK_ALLOWED_APPS_JSON"),
+            "BRAHMA_ULTK_ALLOWED_APPS_JSON",
+        )
+        allow_database_writes = _parse_bool(
+            source.get("BRAHMA_ULTK_ALLOW_DATABASE_WRITES"), default=False
+        )
+        allow_rest_writes = _parse_bool(
+            source.get("BRAHMA_ULTK_ALLOW_REST_WRITES"), default=False
+        )
+
+        for profile_name, profile in database_profiles.items():
+            if not isinstance(profile_name, str) or not isinstance(profile, dict):
+                raise ValueError("Database profiles must be named JSON objects")
+            if any(
+                key.casefold() in {"password", "api_key", "token", "secret", "credential"}
+                for key in profile
+            ):
+                raise ValueError(
+                    "Database secrets must be supplied through environment references, not raw values"
+                )
+        if any(not isinstance(value, dict) for value in rest_endpoints.values()):
+            raise ValueError("REST endpoint configuration values must be JSON objects")
+        if any(
+            key.casefold() in {"password", "api_key", "token", "secret", "credential"}
+            for key in smtp_config
+        ):
+            raise ValueError(
+                "SMTP secrets must be supplied through environment references, not raw values"
+            )
 
         root_data_dir = (data_dir or _default_data_dir(source)).expanduser().resolve()
         audit_path = Path(
@@ -147,4 +221,11 @@ class ULTKSettings:
             granted_capabilities=granted_capabilities,
             approval_capabilities=approval_capabilities,
             trusted_plugins=trusted_plugins,
+            database_profiles=database_profiles,
+            rest_endpoints=rest_endpoints,
+            smtp_config=smtp_config,
+            allowed_executables=allowed_executables,
+            allowed_apps=allowed_apps,
+            allow_database_writes=allow_database_writes,
+            allow_rest_writes=allow_rest_writes,
         )
