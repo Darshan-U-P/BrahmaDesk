@@ -646,7 +646,21 @@ async def lifespan(_: FastAPI):
                 )
             if engine_v1_supervisor is None:
                 raise RuntimeError("ULTK cannot start because the Brahma Engine is not ready")
-            ultk_runtime = create_ultk_runtime(engine_v1_supervisor, ultk_settings)
+            memory_tools = None
+            if "memory" in ultk_settings.enabled_packs:
+                if __package__:
+                    from .integrations.ultk.memory import create_brahmadesk_memory_tools
+                else:
+                    from integrations.ultk.memory import create_brahmadesk_memory_tools
+                memory_tools = create_brahmadesk_memory_tools(
+                    db_connect,
+                    save_global_memory,
+                )
+            ultk_runtime = create_ultk_runtime(
+                engine_v1_supervisor,
+                ultk_settings,
+                memory_tools=memory_tools,
+            )
             print(
                 f"[Brahma Desk] ULTK runtime ready with "
                 f"{len(ultk_runtime.available_tools)} registered tools.",
