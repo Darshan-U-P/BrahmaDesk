@@ -68,14 +68,13 @@ def create_brahmadesk_memory_tools(
                 FROM memories
                 WHERE profile_id = ?
                   AND status = 'active'
-                  AND ((project_id IS NULL AND ? IS NULL) OR project_id = ?)
+                  AND (project_id IS NULL OR project_id = ?)
                   AND (? = '' OR content LIKE ? OR category LIKE ?)
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
                 (
                     profile_id,
-                    project_id,
                     project_id,
                     query,
                     f"%{query}%",
@@ -94,16 +93,19 @@ def create_brahmadesk_memory_tools(
         with db_connect() as db:
             project_id = project_id_from(context, db)
             if project_id is None:
-                return save_global_memory(profile_id, content, category)
-            existing = db.execute(
+                existing = None
+            else:
+                existing = db.execute(
                 """
                 SELECT id FROM memories
                 WHERE profile_id = ? AND project_id = ? AND status = 'active'
                   AND LOWER(TRIM(content)) = LOWER(TRIM(?))
                 LIMIT 1
-                """,
-                (profile_id, project_id, content),
-            ).fetchone()
+                    """,
+                    (profile_id, project_id, content),
+                ).fetchone()
+            if project_id is None:
+                return save_global_memory(profile_id, content, category)
             now = time.time()
             if existing:
                 db.execute(
