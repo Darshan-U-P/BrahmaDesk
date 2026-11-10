@@ -10,7 +10,7 @@ if (-not (Test-Path $Python)) {
 }
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
-$UltkProject = Join-Path $RepoRoot "third_party\\ultk\\pyproject.toml"
+$UltkProject = Join-Path (Join-Path $RepoRoot "third_party") "ultk\\pyproject.toml"
 if (-not (Test-Path $UltkProject)) {
     throw "ULTK submodule is missing. Run: git submodule update --init --recursive"
 }
