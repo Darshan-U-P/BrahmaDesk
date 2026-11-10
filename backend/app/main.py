@@ -362,6 +362,11 @@ class ActiveProfileRequest(BaseModel):
     profile_id: str
 
 
+class AgentRunRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=100_000)
+    conversation_id: str | None = Field(default=None, max_length=128)
+
+
 def get_default_profile(db: sqlite3.Connection) -> dict[str, Any]:
     profile = db.execute(
         """
@@ -1216,6 +1221,201 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     return StreamingResponse(
         generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+
+@app.post("/api/agent/run")
+async def run_agent(request: AgentRunRequest) -> StreamingResponse:
+    """Run a bounded ULTK agent session using server-owned profile and tool policy."""
+    if ultk_runtime is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ULTK is disabled or not ready. Check the backend health endpoint.",
+        )
+    prompt = request.message.strip()
+    if not prompt:
+        raise HTTPException(status_code=422, detail="Message cannot be empty")
+
+    request_id = str(uuid.uuid4())
+    started_at = time.time()
+    with db_connect() as db:
+        profile = get_active_profile_record(db)
+        profile_id = profile["id"]
+        conversation_id = request.conversation_id or str(uuid.uuid4())
+        is_new_conversation = request.conversation_id is None
+        history_rows = []
+        if not is_new_conversation:
+            get_owned_conversation_or_404(db, conversation_id, profile_id)
+            history_rows = db.execute(
+                """
+                SELECT role, content FROM messages
+                WHERE conversation_id = ?
+                ORDER BY created_at DESC, rowid DESC LIMIT 80
+                """,
+                (conversation_id,),
+            ).fetchall()
+
+        settings_row = db.execute(
+            "SELECT settings_json FROM profile_settings WHERE profile_id = ?",
+            (profile_id,),
+        ).fetchone()
+
+    history_rows = list(reversed(history_rows))
+    history = [
+        Message(role=row["role"], content=row["content"])
+        for row in history_rows
+        if row["role"] in {"system", "user", "assistant"}
+    ]
+    history.append(Message(role="user", content=prompt))
+    chat_messages = build_context_messages(
+        history,
+        profile_id,
+        None if is_new_conversation else conversation_id,
+    )
+
+    try:
+        profile_settings = json.loads(settings_row["settings_json"]) if settings_row else {}
+    except (TypeError, ValueError):
+        profile_settings = {}
+    profile_settings = profile_settings if isinstance(profile_settings, dict) else {}
+    preference_fields = [
+        ("Preferred name", "user_name"),
+        ("Primary purpose", "purpose"),
+        ("Role", "role"),
+        ("Interests and expertise", "interests"),
+        ("Current goals", "goals"),
+        ("Response style", "response_style"),
+        ("Preferred language", "language"),
+        ("Additional preferences", "additional_context"),
+    ]
+    preference_lines = [
+        f"- {label}: {str(profile_settings[key]).strip()}"
+        for label, key in preference_fields
+        if str(profile_settings.get(key, "")).strip()
+    ]
+    if preference_lines:
+        system_context = (
+            "You are Brahma Desk, a local-first AI assistant. Use the following "
+            "user-provided profile preferences when relevant. Do not claim to know "
+            "anything beyond these details, and follow the user's current request "
+            "if it conflicts with a preference.\n"
+            "Profile personalization:\n" + "\n".join(preference_lines)
+        )
+        if chat_messages and chat_messages[0].get("role") == "system":
+            chat_messages[0]["content"] += "\n\n" + system_context
+        else:
+            chat_messages.insert(0, {"role": "system", "content": system_context})
+
+    event_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    async def publish_agent_event(event: Mapping[str, Any]) -> None:
+        event_type = str(event.get("type", "agent_event"))
+        if event_type == "run_completed":
+            return
+        safe_event: dict[str, Any] = {
+            "type": event_type,
+            "request_id": request_id,
+        }
+        for key in ("step", "tool_call_count", "call_id", "tool_name", "is_error"):
+            if key in event:
+                safe_event[key] = event[key]
+        if event_type == "approval_required":
+            metadata = event.get("metadata")
+            if isinstance(metadata, Mapping) and metadata.get("approval_id"):
+                safe_event["approval_id"] = metadata["approval_id"]
+        await event_queue.put(safe_event)
+
+    async def execute_agent() -> None:
+        try:
+            answer = await ultk_runtime.run(
+                prompt,
+                session_id=f"{profile_id}:{conversation_id}",
+                messages=chat_messages,
+                tool_metadata={
+                    "request_id": request_id,
+                    "profile_id": profile_id,
+                    "conversation_id": conversation_id,
+                },
+                on_event=publish_agent_event,
+            )
+            if not answer.strip():
+                raise RuntimeError("Agent returned an empty final response")
+            completed_at = time.time()
+            with db_connect() as db:
+                if is_new_conversation:
+                    title = prompt.replace("\n", " ").strip()[:60] or "New chat"
+                    db.execute(
+                        """
+                        INSERT INTO conversations
+                            (id, title, created_at, updated_at, profile_id)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (conversation_id, title, started_at, completed_at, profile_id),
+                    )
+                else:
+                    get_owned_conversation_or_404(db, conversation_id, profile_id)
+                db.execute(
+                    """
+                    INSERT INTO messages(id, conversation_id, role, content, created_at)
+                    VALUES (?, ?, 'user', ?, ?)
+                    """,
+                    (str(uuid.uuid4()), conversation_id, prompt, started_at),
+                )
+                db.execute(
+                    """
+                    INSERT INTO messages(id, conversation_id, role, content, created_at)
+                    VALUES (?, ?, 'assistant', ?, ?)
+                    """,
+                    (str(uuid.uuid4()), conversation_id, answer, completed_at),
+                )
+                db.execute(
+                    "UPDATE conversations SET updated_at = ? WHERE id = ? AND profile_id = ?",
+                    (completed_at, conversation_id, profile_id),
+                )
+            await event_queue.put({
+                "type": "assistant_final",
+                "request_id": request_id,
+                "conversation_id": conversation_id,
+                "content": answer,
+            })
+            await event_queue.put({
+                "type": "done",
+                "request_id": request_id,
+                "conversation_id": conversation_id,
+            })
+        except Exception as exc:  # noqa: BLE001 - keep internal details in local logs only
+            print(f"[Brahma Desk] ULTK agent run {request_id} failed: {exc}", flush=True)
+            await event_queue.put({
+                "type": "error",
+                "request_id": request_id,
+                "message": "Agent execution failed. Check local backend logs.",
+            })
+        finally:
+            await event_queue.put(None)
+
+    async def stream_events():
+        task = asyncio.create_task(execute_agent())
+        yield f"data: {json.dumps({'type': 'run_started', 'request_id': request_id, 'conversation_id': conversation_id})}\n\n"
+        try:
+            while True:
+                event = await event_queue.get()
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        stream_events(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
