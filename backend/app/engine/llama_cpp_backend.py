@@ -25,6 +25,7 @@ from .contracts import (
     EngineState,
     GenerationChunk,
     GenerationRequest,
+    GenerationToolCall,
     ModelArtifact,
     ResourcePlan,
 )
@@ -239,6 +240,43 @@ class LlamaCppServerBackend:
             },
         )
 
+    @staticmethod
+    def _parse_tool_calls(raw_calls: object) -> tuple[GenerationToolCall, ...]:
+        """Validate provider tool-call envelopes before exposing them to the agent layer."""
+        if raw_calls is None:
+            return ()
+        if not isinstance(raw_calls, list) or len(raw_calls) > 32:
+            raise ValueError("The model returned an invalid or oversized tool-call collection")
+        parsed: list[GenerationToolCall] = []
+        for raw_call in raw_calls:
+            if not isinstance(raw_call, dict):
+                raise ValueError("The model returned an invalid tool call")
+            function = raw_call.get("function")
+            if not isinstance(function, dict):
+                raise ValueError("A tool call is missing its function payload")
+            name = function.get("name")
+            call_id = raw_call.get("id")
+            raw_arguments = function.get("arguments", "{}")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("A tool call is missing its function name")
+            if not isinstance(call_id, str) or not call_id.strip():
+                raise ValueError("A tool call is missing its call ID")
+            if isinstance(raw_arguments, str):
+                try:
+                    arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("A tool call contains malformed JSON arguments") from exc
+            else:
+                arguments = raw_arguments
+            if not isinstance(arguments, dict):
+                raise ValueError("Tool-call arguments must be a JSON object")
+            parsed.append(GenerationToolCall(
+                id=call_id,
+                name=name,
+                arguments=arguments,
+            ))
+        return tuple(parsed)
+
     async def generate(
         self, request: GenerationRequest
     ) -> AsyncIterator[GenerationChunk]:
@@ -259,6 +297,9 @@ class LlamaCppServerBackend:
             "temperature": request.temperature,
             "stream": request.stream,
         }
+        if request.tools:
+            payload["tools"] = request.tools
+            payload["tool_choice"] = "auto"
 
         try:
             async with httpx.AsyncClient(timeout=self._request_timeout) as client:
@@ -270,21 +311,29 @@ class LlamaCppServerBackend:
                     response.raise_for_status()
                     data = response.json()
                     choices = data.get("choices") or []
-                    answer = (
-                        choices[0].get("message", {}).get("content", "")
-                        if choices else ""
-                    )
-                    if not isinstance(answer, str) or not answer.strip():
-                        raise ValueError("The model returned no text")
+                    message = choices[0].get("message", {}) if choices else {}
+                    answer = message.get("content") or ""
+                    if not isinstance(answer, str):
+                        raise ValueError("The model returned an invalid text response")
+                    tool_calls = self._parse_tool_calls(message.get("tool_calls"))
+                    if not answer.strip() and not tool_calls:
+                        raise ValueError("The model returned neither text nor tool calls")
 
                     yield GenerationChunk(
                         text=answer,
                         finished=True,
-                        finish_reason="stop",
+                        finish_reason=(
+                            choices[0].get("finish_reason") or "stop"
+                            if choices else "stop"
+                        ),
+                        tool_calls=tool_calls,
                     )
                     return
 
                 answer_seen = False
+                tool_call_fragments: dict[int, dict[str, str]] = {}
+                stream_complete = False
+                finish_reason: str | None = None
                 async with client.stream(
                     "POST",
                     f"{self._base_url}/v1/chat/completions",
@@ -300,6 +349,7 @@ class LlamaCppServerBackend:
                         if not data:
                             continue
                         if data == "[DONE]":
+                            stream_complete = True
                             break
 
                         event = json.loads(data)
@@ -318,16 +368,52 @@ class LlamaCppServerBackend:
                             answer_seen = True
                             yield GenerationChunk(text=content)
 
-                        finish_reason = choice.get("finish_reason")
-                        if finish_reason is not None:
-                            yield GenerationChunk(
-                                text="",
-                                finished=True,
-                                finish_reason=finish_reason,
+                        for raw_call in delta.get("tool_calls") or []:
+                            if not isinstance(raw_call, dict):
+                                raise ValueError("The model returned an invalid tool-call delta")
+                            index = raw_call.get("index")
+                            if not isinstance(index, int) or index < 0 or index > 31:
+                                raise ValueError("The model returned an invalid tool-call index")
+                            fragment = tool_call_fragments.setdefault(
+                                index, {"id": "", "name": "", "arguments": ""}
                             )
+                            if raw_call.get("id"):
+                                fragment["id"] = str(raw_call["id"])
+                            function = raw_call.get("function") or {}
+                            if not isinstance(function, dict):
+                                raise ValueError("The model returned an invalid function delta")
+                            if function.get("name"):
+                                fragment["name"] += str(function["name"])
+                            if function.get("arguments"):
+                                arguments_part = function["arguments"]
+                                if not isinstance(arguments_part, str):
+                                    raise ValueError("Tool-call argument deltas must be strings")
+                                fragment["arguments"] += arguments_part
 
-                if not answer_seen:
-                    raise ValueError("The streaming response contained no text")
+                        if choice.get("finish_reason") is not None:
+                            finish_reason = str(choice["finish_reason"])
+
+                if not stream_complete:
+                    raise ValueError("The model response stream ended before its completion marker")
+                assembled_calls = [
+                    {
+                        "id": item["id"],
+                        "function": {
+                            "name": item["name"],
+                            "arguments": item["arguments"] or "{}",
+                        },
+                    }
+                    for _, item in sorted(tool_call_fragments.items())
+                ]
+                tool_calls = self._parse_tool_calls(assembled_calls)
+                if not answer_seen and not tool_calls:
+                    raise ValueError("The streaming response contained neither text nor tool calls")
+                yield GenerationChunk(
+                    text="",
+                    finished=True,
+                    finish_reason=finish_reason or "stop",
+                    tool_calls=tool_calls,
+                )
 
         except httpx.HTTPError as exc:
             raise EngineError(
