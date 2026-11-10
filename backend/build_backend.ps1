@@ -9,6 +9,12 @@ if (-not (Test-Path $Python)) {
     py -3.12 -m venv .venv
 }
 
+$RepoRoot = Split-Path $PSScriptRoot -Parent
+$UltkProject = Join-Path $RepoRoot "third_party\\ultk\\pyproject.toml"
+if (-not (Test-Path $UltkProject)) {
+    throw "ULTK submodule is missing. Run: git submodule update --init --recursive"
+}
+
 & $Python -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to upgrade pip."
@@ -55,6 +61,9 @@ uvicorn.run(
     --collect-all starlette `
     --collect-all pydantic `
     --collect-all httpx `
+    --collect-submodules ultk `
+    --collect-all jsonschema `
+    --collect-all psutil `
     --hidden-import app.main `
     ".\run_backend.py"
 
