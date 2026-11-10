@@ -29,6 +29,14 @@ except ImportError:
     EngineError = EngineSettings = EngineSupervisor = None  # type: ignore[assignment]
     GenerationRequest = LlamaCppServerBackend = None  # type: ignore[assignment]
 
+try:
+    if __package__:
+        from .integrations.ultk import ULTKSettings, create_ultk_runtime
+    else:
+        from integrations.ultk import ULTKSettings, create_ultk_runtime
+except ImportError:
+    ULTKSettings = create_ultk_runtime = None  # type: ignore[assignment]
+
 
 # ---------------------------------------------------------------------------
 # Paths and configuration
@@ -255,6 +263,9 @@ MODEL_ID = os.getenv("LLAMA_MODEL_ID", "local-model")
 # Opt-in only until Engine v1 has been verified in the local desktop workflow.
 ENGINE_V1_ENABLED = os.getenv("BRAHMA_ENGINE_V1_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 engine_v1_supervisor = None
+ultk_runtime = None
+ultk_settings = None
+ultk_start_error: str | None = None
 
 # Electron generates a random token and passes it to this backend.
 # The shutdown endpoint is disabled unless a token is configured.
@@ -604,15 +615,43 @@ async def start_engine_v1() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global engine_v1_supervisor, ultk_runtime, ultk_settings, ultk_start_error
     await load_saved_llama_server_path()
     if ENGINE_V1_ENABLED:
         await start_engine_v1()
     else:
         await start_llama_if_needed()
     try:
+        ultk_settings = (
+            ULTKSettings.from_env(data_dir=DATA_DIR)
+            if ULTKSettings is not None
+            else None
+        )
+        ultk_requested = os.getenv("BRAHMA_ULTK_ENABLED", "0").strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if ultk_requested and (ULTKSettings is None or create_ultk_runtime is None):
+            raise RuntimeError("ULTK integration modules are unavailable in this installation")
+        if ultk_settings is not None and ultk_settings.enabled:
+            if not ENGINE_V1_ENABLED:
+                raise RuntimeError(
+                    "ULTK requires BRAHMA_ENGINE_V1_ENABLED=1 because structured "
+                    "tool-call generation is provided by the Brahma Engine adapter."
+                )
+            if engine_v1_supervisor is None:
+                raise RuntimeError("ULTK cannot start because the Brahma Engine is not ready")
+            ultk_runtime = create_ultk_runtime(engine_v1_supervisor, ultk_settings)
+            print(
+                f"[Brahma Desk] ULTK runtime ready with "
+                f"{len(ultk_runtime.available_tools)} registered tools.",
+                flush=True,
+            )
         yield
+    except Exception as exc:
+        ultk_start_error = str(exc)
+        raise
     finally:
-        global engine_v1_supervisor
+        ultk_runtime = None
         if ENGINE_V1_ENABLED and engine_v1_supervisor is not None:
             try:
                 await engine_v1_supervisor.stop()
@@ -724,6 +763,17 @@ async def health() -> dict[str, Any]:
     except (httpx.HTTPError, ValueError):
         pass
 
+    status["ultk"] = {
+        "enabled": bool(ultk_settings and ultk_settings.enabled),
+        "ready": ultk_runtime is not None,
+        "registered_tool_count": (
+            len(ultk_runtime.available_tools) if ultk_runtime is not None else 0
+        ),
+        "registered_tools": (
+            list(ultk_runtime.available_tools) if ultk_runtime is not None else []
+        ),
+        "startup_error": ultk_start_error,
+    }
     return status
 
 
