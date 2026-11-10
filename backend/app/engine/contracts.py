@@ -109,6 +109,15 @@ class EngineHealth:
 
 
 @dataclass(frozen=True, slots=True)
+class GenerationToolCall:
+    """Validated structured tool call returned by an inference backend."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class GenerationRequest:
     prompt: str
     max_tokens: int = 256
@@ -116,6 +125,7 @@ class GenerationRequest:
     options: dict[str, Any] = field(default_factory=dict)
     messages: list[dict[str, Any]] | None = None
     stream: bool = False
+    tools: list[dict[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         if not self.prompt.strip():
@@ -124,6 +134,8 @@ class GenerationRequest:
             raise ValueError("max_tokens must be between 1 and 131072")
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError("temperature must be between 0 and 2")
+        if self.tools is not None and len(self.tools) > 32:
+            raise ValueError("tools cannot contain more than 32 definitions")
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +143,7 @@ class GenerationChunk:
     text: str
     finished: bool = False
     finish_reason: str | None = None
+    tool_calls: tuple[GenerationToolCall, ...] = ()
 
 
 class InferenceBackend(Protocol):
