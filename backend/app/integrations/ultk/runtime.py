@@ -71,6 +71,8 @@ def create_ultk_runtime(
     settings: ULTKSettings,
     *,
     on_approval_request: ApprovalEventHandler | None = None,
+    memory_tools: Sequence[Any] | None = None,
+    grounder: Any = None,
 ) -> ULTKRuntime:
     """Create one embedded ULTK runtime using host-owned policy and paths.
 
@@ -84,12 +86,31 @@ def create_ultk_runtime(
     from ultk.engine import ToolEngine
     from ultk.permissions import AllowListPolicy, DenyAllPolicy
 
-    deferred = settings.enabled_packs.intersection({"database", "rest", "email", "memory"})
-    if deferred:
-        names = ", ".join(sorted(deferred))
+    if "database" in settings.enabled_packs and not settings.database_profiles:
+        raise ValueError("The database pack requires BRAHMA_ULTK_DATABASE_PROFILES_JSON.")
+    if "rest" in settings.enabled_packs and not settings.rest_endpoints:
+        raise ValueError("The REST pack requires BRAHMA_ULTK_REST_ENDPOINTS_JSON.")
+    if "email" in settings.enabled_packs and not settings.smtp_config:
+        raise ValueError("The email pack requires BRAHMA_ULTK_SMTP_CONFIG_JSON.")
+    if "memory" in settings.enabled_packs and not memory_tools:
+        raise ValueError("The memory pack requires the BrahmaDesk memory adapter.")
+    if "computer_grounding" in settings.enabled_packs and grounder is None:
+        raise ValueError("The computer_grounding pack requires a host-provided visual grounder.")
+
+    sensitive_markers = (
+        "write", "delete", "execute", "send", "commit", "push",
+        "publish", "launch", "input", "terminate", "shutdown", "install",
+    )
+    sensitive_grants = {
+        capability
+        for capability in settings.granted_capabilities
+        if any(marker in capability.casefold() for marker in sensitive_markers)
+    }
+    missing_approvals = sensitive_grants - settings.approval_capabilities
+    if missing_approvals:
         raise ValueError(
-            "These ULTK packs need BrahmaDesk-specific service or memory adapters "
-            f"before they can be enabled: {names}"
+            "Sensitive capabilities must also require human approval: "
+            + ", ".join(sorted(missing_approvals))
         )
 
     policy = (
@@ -125,12 +146,12 @@ def create_ultk_runtime(
     if "terminal" in packs:
         tool_engine.install_terminal_tools(
             _require_workspace(settings, "terminal"),
-            allowed_executables={},
+            allowed_executables=settings.allowed_executables,
         )
     if "computer" in packs:
         tool_engine.install_computer_tools(
             image_root=state_dir / "screenshots",
-            allowed_apps={},
+            allowed_apps=settings.allowed_apps,
         )
     if "computer_advanced" in packs:
         tool_engine.install_advanced_computer_tools(
@@ -147,6 +168,8 @@ def create_ultk_runtime(
         tool_engine.install_computer_vision_tools(
             template_root=state_dir / "computer-templates",
         )
+    if "computer_grounding" in packs:
+        tool_engine.install_computer_grounding_tools(grounder=grounder)
     if "browser" in packs:
         tool_engine.install_advanced_browser_tools(
             session_root=state_dir / "browser-sessions",
@@ -164,7 +187,7 @@ def create_ultk_runtime(
     if "development" in packs:
         tool_engine.install_development_tools(
             project_root=_require_workspace(settings, "development"),
-            allowed_executables={},
+            allowed_executables=settings.allowed_executables,
         )
     if "development_advanced" in packs:
         tool_engine.install_advanced_development_tools(
@@ -179,16 +202,31 @@ def create_ultk_runtime(
         tool_engine.install_document_tools(
             root_dir=_require_workspace(settings, "documents"),
         )
+    if "web" in packs:
+        tool_engine.install_web_tools(
+            download_root=state_dir / "downloads",
+        )
     if "data" in packs:
         tool_engine.install_data_tools(
             root_dir=_require_workspace(settings, "data"),
             sqlite_database=state_dir / "workspace-data.sqlite3",
-            allow_database_writes=False,
+            allow_database_writes=settings.allow_database_writes,
         )
     if "structured_data" in packs:
         tool_engine.install_structured_data_tools(
             root_dir=_require_workspace(settings, "structured_data"),
         )
+    if "database" in packs:
+        tool_engine.install_database_tools(settings.database_profiles)
+    if "rest" in packs:
+        tool_engine.install_rest_tools(
+            settings.rest_endpoints,
+            allow_writes=settings.allow_rest_writes,
+        )
+    if "email" in packs:
+        tool_engine.install_email_tools(**settings.smtp_config)
+    if "memory" in packs:
+        tool_engine.register_tools(memory_tools or ())
     if "media" in packs:
         tool_engine.install_media_tools(
             root_dir=state_dir / "media",
